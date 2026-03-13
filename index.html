@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Attention</title>
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="icon" type="image/png" href="/icon.png">
+    <link rel="apple-touch-icon" href="/icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <meta name="apple-mobile-web-app-title" content="Attention">
+    <style>
+
+    </style>
+</head>
+<body>
+<br>
+<h1>Attention</h1>
+
+<button id="subs" style="margin: auto; display: none;">Subscribe</button>
+
+<script>
+    // 这是 pwanotify.js 里用的公钥 (VAPID Public Key)
+    const PUBLIC_VAPID_KEY = 'BOmLSICq2WtWMUjQz1bnOz5PRuTZydfw4gLM1e_3EIpL88fagVC29SpTahc_tY1ky4_JnNh9qGdO19pmBcveJMQ';
+    let hasSubscribed = false;
+
+    function urlBase64ToUint8Array(base64String) {
+        const padding = '='.repeat((4 - base64String.length % 4) % 4);
+        const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+        const rawData = window.atob(base64);
+        const outputArray = new Uint8Array(rawData.length);
+        for (let i = 0; i < rawData.length; ++i) {
+            outputArray[i] = rawData.charCodeAt(i);
+        }
+        return outputArray;
+    }
+
+    async function subscribe() {
+        try {
+            if (hasSubscribed) return;
+
+            if (Notification.permission === 'default') {
+                const permission = await Notification.requestPermission();
+                if (permission !== 'granted') return;
+            }
+
+            if (Notification.permission !== 'granted') return;
+
+            // Subscribe directly via window.pushManager (No Service Worker needed)
+            const existingSubscription = typeof window.pushManager.getSubscription === 'function'
+                ? await window.pushManager.getSubscription()
+                : null;
+
+            const subscription = existingSubscription || await window.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: urlBase64ToUint8Array(PUBLIC_VAPID_KEY)
+            });
+
+            // Auto-save to server
+            await fetch('/subscribe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(subscription)
+            });
+
+            // 成功注册并上报服务器后，隐藏按钮
+            document.getElementById('subs').style.display = 'none';
+            hasSubscribed = true;
+
+        } catch (err) {
+            // console.error('Failed to subscribe:', err);
+        }
+    }
+
+    // 启动时：检测是否已经完成过所有注册流程
+    window.addEventListener('load', async () => {
+        // 对于完全的按钮方案，取消 localStorage 防火墙限制更靠谱
+        let btn = document.getElementById('subs');
+
+        // 如果目前仍是未授权（出厂默认状态），显示按钮并挂载专门的点击事件
+        if (Notification.permission === 'default') {
+            btn.style.display = 'block';
+            btn.addEventListener('click', async () => {
+                if (hasSubscribed) return;
+                await subscribe();
+            });
+            return;
+        }
+
+        // 如果系统已经是在允许的状态（因为用户从别的tab授权或者以前点过允许了）
+        if (Notification.permission === 'granted') {
+            if (typeof window.pushManager.getSubscription === 'function') {
+                const existingSubscription = await window.pushManager.getSubscription();
+                if (existingSubscription) {
+                    hasSubscribed = true;
+                    return;
+                }
+            }
+            // 走到这里情况基本为之前授权过，但订阅信息丢失了，主动静默恢复（走无手势订阅不需要弹窗）
+            subscribe();
+        }
+    });
+</script>
+</body>
+
+</html>
