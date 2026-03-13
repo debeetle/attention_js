@@ -1,6 +1,0 @@
-{
-  "dependencies": {
-    "rsshub": "^1.0.0-master.d59c3ee",
-    "web-push": "^3.6.7"
-  }
-}

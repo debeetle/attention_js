@@ -2,7 +2,7 @@ const https = require('https');
 const fs = require('fs');
 const url = require('url');
 const path = require('path');
-const webpush = require('web-push');
+const webpush = require('./webpush-pwa');
 
 // 手动读取 .env 文件
 if (fs.existsSync('.env')) {
@@ -87,8 +87,8 @@ const server = https.createServer(options, (req, res) => {
     if (filePath === './') filePath = './index.html';
 
     // 安全检查：禁止访问敏感文件
-    const forbiddenFiles = ['./pwanotify.js', './send.js', './.env', './subs.json', './key.pem', './cert.pem', './package.json', './package-lock.json'];
-    if (forbiddenFiles.includes(filePath) || filePath.includes('node_modules')) {
+    const forbiddenFiles = ['./pwaserver.js', './send.js', './.env', './subs.json', './key.pem', './cert.pem'];
+    if (forbiddenFiles.includes(filePath)) {
         res.writeHead(403);
         res.end('403 Forbidden');
         return;

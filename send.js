@@ -1,7 +1,6 @@
-const webpush = require('web-push');
+const webpush = require('./webpush-pwa');
 const fs = require('fs');
 
-// 手动读取 .env 文件（不需要垃圾包）
 if (fs.existsSync('.env')) {
     const envContent = fs.readFileSync('.env', 'utf-8');
     envContent.split('\n').forEach(line => {
@@ -30,3 +29,12 @@ const payload = JSON.stringify({
 });
 
 webpush.sendNotification(subscription, payload)
+    .then(() => {
+        console.log('Push send succeeded');
+        process.exit(0);
+    })
+    .catch(err => {
+        console.error('Push send failed:', err && err.message ? err.message : err);
+        if (err && err.status) console.error('Status:', err.status);
+        process.exit(1);
+    });
