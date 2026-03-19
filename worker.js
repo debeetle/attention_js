@@ -1,4 +1,4 @@
-import { setVapidDetails, sendNotification } from './webpush-esm.js';
+import { setVapidDetails, sendNotification } from './websub_webhook_rss.js';
 
 function base64ToUint8Array(b64) {
   const bin = atob(b64);

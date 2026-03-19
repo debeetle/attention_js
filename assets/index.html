@@ -18,8 +18,6 @@
 <br>
 <h1>Attention</h1>
 
-<button id="subs" style="margin: auto; display: none;">Subscribe</button>
-
 <script>
     let hasSubscribed = false;
     let PUBLIC_VAPID_KEY = '';
@@ -64,8 +62,6 @@
                 body: JSON.stringify(subscription)
             });
 
-            // 成功注册并上报服务器后，隐藏按钮
-            document.getElementById('subs').style.display = 'none';
             hasSubscribed = true;
 
         } catch (err) {
@@ -82,21 +78,11 @@
         } catch (err) {
             return;
         }
-
-        // 对于完全的按钮方案，取消 localStorage 防火墙限制更靠谱
-        let btn = document.getElementById('subs');
-
-        // 如果目前仍是未授权（出厂默认状态），显示按钮并挂载专门的点击事件
         if (Notification.permission === 'default') {
-            btn.style.display = 'block';
-            btn.addEventListener('click', async () => {
-                if (hasSubscribed) return;
-                await subscribe();
-            });
+            await subscribe();
             return;
         }
 
-        // 如果系统已经是在允许的状态（因为用户从别的tab授权或者以前点过允许了）
         if (Notification.permission === 'granted') {
             if (typeof window.pushManager.getSubscription === 'function') {
                 const existingSubscription = await window.pushManager.getSubscription();
@@ -105,7 +91,6 @@
                     return;
                 }
             }
-            // 走到这里情况基本为之前授权过，但订阅信息丢失了，主动静默恢复（走无手势订阅不需要弹窗）
             subscribe();
         }
     });

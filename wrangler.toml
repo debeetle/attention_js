@@ -1,5 +1,5 @@
-name = "allyouneed"
-main = "worker/worker.js"
+name = "attention"
+main = "worker.js"
 compatibility_date = "2026-03-19"
 workers_dev = true
 
