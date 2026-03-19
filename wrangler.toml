@@ -1,0 +1,14 @@
+name = "allyouneed"
+main = "worker/worker.js"
+compatibility_date = "2026-03-19"
+workers_dev = true
+
+[assets]
+directory = "./assets"
+binding = "ASSETS"
+html_handling = "auto-trailing-slash"
+not_found_handling = "404-page"
+
+[[kv_namespaces]]
+binding = "SUBS"
+id = "c659f42d555b4a4ca17c7653677e64cc"

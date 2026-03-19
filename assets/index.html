@@ -21,9 +21,8 @@
 <button id="subs" style="margin: auto; display: none;">Subscribe</button>
 
 <script>
-    // 这是 pwanotify.js 里用的公钥 (VAPID Public Key)
-    const PUBLIC_VAPID_KEY = 'BOmLSICq2WtWMUjQz1bnOz5PRuTZydfw4gLM1e_3EIpL88fagVC29SpTahc_tY1ky4_JnNh9qGdO19pmBcveJMQ';
     let hasSubscribed = false;
+    let PUBLIC_VAPID_KEY = '';
 
     function urlBase64ToUint8Array(base64String) {
         const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -39,6 +38,7 @@
     async function subscribe() {
         try {
             if (hasSubscribed) return;
+            if (!PUBLIC_VAPID_KEY) return;
 
             if (Notification.permission === 'default') {
                 const permission = await Notification.requestPermission();
@@ -75,6 +75,14 @@
 
     // 启动时：检测是否已经完成过所有注册流程
     window.addEventListener('load', async () => {
+        try {
+            const res = await fetch('/config', { cache: 'no-store' });
+            const config = await res.json();
+            PUBLIC_VAPID_KEY = config.vapidPublicKey || '';
+        } catch (err) {
+            return;
+        }
+
         // 对于完全的按钮方案，取消 localStorage 防火墙限制更靠谱
         let btn = document.getElementById('subs');
 
