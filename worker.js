@@ -1,4 +1,4 @@
-import { setVapidDetails, sendNotification } from './websub_webhook_rss.js';
+import { setVapidDetails, sendNotification } from './pwanotify.js';
 
 function base64ToUint8Array(b64) {
   const bin = atob(b64);
@@ -96,6 +96,100 @@ async function fetchFeedPreview(feedUrl) {
   });
   const text = await res.text();
   return { status: res.status, contentType: res.headers.get('content-type') || '', text };
+}
+
+function decodeXmlEntities(str) {
+  return (str || '')
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim();
+}
+
+function stripTags(str) {
+  return decodeXmlEntities((str || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')).trim();
+}
+
+function firstMatch(text, patterns) {
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match && match[1]) return match[1].trim();
+  }
+  return '';
+}
+
+function parseLatestFeedItem(feedText) {
+  const itemBlock = firstMatch(feedText, [
+    /<item\b[^>]*>([\s\S]*?)<\/item>/i,
+    /<entry\b[^>]*>([\s\S]*?)<\/entry>/i
+  ]);
+  if (!itemBlock) return null;
+
+  const feedTitle = stripTags(firstMatch(feedText, [
+    /<channel\b[^>]*>[\s\S]*?<title>([\s\S]*?)<\/title>/i,
+    /<feed\b[^>]*>[\s\S]*?<title[^>]*>([\s\S]*?)<\/title>/i
+  ]));
+  const title = stripTags(firstMatch(itemBlock, [
+    /<title[^>]*>([\s\S]*?)<\/title>/i
+  ]));
+  const link = decodeXmlEntities(firstMatch(itemBlock, [
+    /<link>([\s\S]*?)<\/link>/i,
+    /<link[^>]*href=["']([^"']+)["'][^>]*\/?>(?:<\/link>)?/i,
+    /<guid[^>]*>(https?:[^<]+)<\/guid>/i,
+    /<id[^>]*>(https?:[^<]+)<\/id>/i
+  ]));
+  const description = stripTags(firstMatch(itemBlock, [
+    /<description[^>]*>([\s\S]*?)<\/description>/i,
+    /<content[^>]*>([\s\S]*?)<\/content>/i,
+    /<summary[^>]*>([\s\S]*?)<\/summary>/i
+  ])).slice(0, 160);
+
+  return { feedTitle, title, link, description };
+}
+
+async function listSubscriptions(env) {
+  const out = [];
+  let cursor = undefined;
+  for (;;) {
+    const page = await env.SUBS.list({ cursor, limit: 1000 });
+    for (const key of page.keys || []) {
+      const stored = await env.SUBS.get(key.name);
+      if (!stored) continue;
+      try {
+        const parsed = JSON.parse(stored);
+        const plain = await aesGcmDecrypt(env.SUBS_ENC_KEY, parsed.iv, parsed.ct);
+        const sub = JSON.parse(plain).sub;
+        if (sub && sub.endpoint) out.push(sub);
+      } catch (e) {
+      }
+    }
+    if (!page.list_complete) {
+      cursor = page.cursor;
+      continue;
+    }
+    return out;
+  }
+}
+
+async function sendToAllSubscriptions(env, payload) {
+  const subscriptions = await listSubscriptions(env);
+  const results = { total: subscriptions.length, sent: 0, failed: 0, errors: [] };
+  for (const subscription of subscriptions) {
+    try {
+      await sendNotification(subscription, JSON.stringify(payload));
+      results.sent += 1;
+    } catch (e) {
+      results.failed += 1;
+      results.errors.push({
+        endpoint: subscription.endpoint,
+        error: String(e && e.message ? e.message : e)
+      });
+    }
+  }
+  return results;
 }
 
 function json(data, status = 200, extraHeaders = {}) {
@@ -269,7 +363,7 @@ export default {
       return new Response(null, { status: 204 });
     }
 
-    if (request.method === 'GET' && url.pathname === '/poll') {
+    if (request.method === 'GET' && url.pathname === '/rss/preview') {
       const feedUrl = url.searchParams.get('url') || env.POLL_URL || '';
       if (!feedUrl) return new Response('Missing feed URL', { status: 400 });
       const preview = await fetchFeedPreview(feedUrl);
@@ -280,6 +374,42 @@ export default {
         contentType: preview.contentType,
         preview: preview.text.slice(0, 4000)
       });
+    }
+
+    if (request.method === 'POST' && url.pathname === '/rss/send') {
+      const apiKey = request.headers.get('x-api-key');
+      if (!apiKey || apiKey !== env.SEND_API_KEY) return new Response('Unauthorized', { status: 401 });
+
+      const body = await request.json().catch(() => ({}));
+      const feedUrl = body.url || env.POLL_URL || '';
+      if (!feedUrl) return new Response('Missing feed URL', { status: 400 });
+
+      const preview = await fetchFeedPreview(feedUrl);
+      if (preview.status < 200 || preview.status >= 300) {
+        return json({ ok: false, feedUrl, status: preview.status, error: 'Feed fetch failed' }, 502);
+      }
+
+      const item = parseLatestFeedItem(preview.text);
+      if (!item || !item.title) return new Response('Unable to parse latest feed item', { status: 422 });
+
+      const payload = {
+        web_push: 8030,
+        notification: {
+          title: item.title,
+          body: item.description || item.feedTitle || 'New RSS item',
+          navigate: item.link || feedUrl,
+          silent: false,
+          app_badge: '1'
+        }
+      };
+
+      const result = await sendToAllSubscriptions(env, payload);
+      return json({
+        ok: result.failed === 0,
+        feedUrl,
+        item,
+        ...result
+      }, result.failed === 0 ? 200 : 207);
     }
 
     return env.ASSETS.fetch(request);

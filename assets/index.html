@@ -17,6 +17,7 @@
 <body>
 <br>
 <h1>Attention</h1>
+<button id="enable-notifications" style="display:none;">Enable Notifications</button>
 
 <script>
     let hasSubscribed = false;
@@ -63,6 +64,8 @@
             });
 
             hasSubscribed = true;
+            const button = document.getElementById('enable-notifications');
+            if (button) button.style.display = 'none';
 
         } catch (err) {
             // console.error('Failed to subscribe:', err);
@@ -71,6 +74,7 @@
 
     // 启动时：检测是否已经完成过所有注册流程
     window.addEventListener('load', async () => {
+        const button = document.getElementById('enable-notifications');
         try {
             const res = await fetch('/config', { cache: 'no-store' });
             const config = await res.json();
@@ -79,7 +83,10 @@
             return;
         }
         if (Notification.permission === 'default') {
-            await subscribe();
+            if (button) {
+                button.style.display = 'inline-block';
+                button.addEventListener('click', subscribe, { once: true });
+            }
             return;
         }
 

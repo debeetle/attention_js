@@ -1,7 +1,9 @@
 name = "attention"
 main = "worker.js"
 compatibility_date = "2026-03-19"
-workers_dev = true
+workers_dev = false
+keep_vars = true
+placement = { mode = "smart" }
 
 [assets]
 directory = "./assets"
@@ -12,3 +14,8 @@ not_found_handling = "404-page"
 [[kv_namespaces]]
 binding = "SUBS"
 id = "c659f42d555b4a4ca17c7653677e64cc"
+
+[[routes]]
+pattern = "attention.debeetle.cn.eu.org"
+zone_name = "debeetle.cn.eu.org"
+custom_domain = true
