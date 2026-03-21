@@ -27,4 +27,4 @@ ehthumbs.gl
 ehthumbs_vista.gl
 
 # Cloudflare
-.wrangler/
+.wrangler/cache/
