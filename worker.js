@@ -150,6 +150,24 @@ function parseLatestFeedItem(feedText) {
   return { feedTitle, title, link, description };
 }
 
+function buildNotificationPayloadFromFeed(feedText, fallbackUrl = '') {
+  const item = parseLatestFeedItem(feedText);
+  if (!item || !item.title) return null;
+  return {
+    item,
+    payload: {
+      web_push: 8030,
+      notification: {
+        title: item.title,
+        body: item.description || item.feedTitle || 'New feed item',
+        navigate: item.link || fallbackUrl,
+        silent: false,
+        app_badge: '1'
+      }
+    }
+  };
+}
+
 async function listSubscriptions(env) {
   const out = [];
   let cursor = undefined;
@@ -192,6 +210,18 @@ async function sendToAllSubscriptions(env, payload) {
   return results;
 }
 
+async function handleWebSubDelivery(env, rawBody, fallbackUrl = '') {
+  const text = new TextDecoder().decode(rawBody);
+  const built = buildNotificationPayloadFromFeed(text, fallbackUrl);
+  if (!built) return { ok: false, reason: 'unable_to_parse_feed_item' };
+  const result = await sendToAllSubscriptions(env, built.payload);
+  return {
+    ok: result.failed === 0,
+    item: built.item,
+    ...result
+  };
+}
+
 function json(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
     status,
@@ -204,7 +234,7 @@ function json(data, status = 200, extraHeaders = {}) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const allowedOrigins = splitCsv(env.ALLOWED_ORIGINS);
 
@@ -302,6 +332,13 @@ export default {
         if (env.WEBSUB_SECRET) {
           const ok = await verifyWebhookSignature(request, rawBody, env.WEBSUB_SECRET);
           if (!ok) return new Response('Unauthorized', { status: 401 });
+        }
+        const fallbackUrl = url.searchParams.get('hub.topic') || '';
+        const work = handleWebSubDelivery(env, rawBody, fallbackUrl);
+        if (ctx && typeof ctx.waitUntil === 'function') {
+          ctx.waitUntil(work);
+        } else {
+          await work;
         }
         return new Response(null, { status: 204 });
       }
