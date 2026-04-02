@@ -11,17 +11,123 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black">
     <meta name="apple-mobile-web-app-title" content="Attention">
     <style>
-
+        body {
+            margin: 0;
+            padding: 24px 20px 40px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            line-height: 1.5;
+            color: #111;
+            background: #f7f7f2;
+        }
+        main {
+            max-width: 720px;
+            margin: 0 auto;
+        }
+        h1 {
+            margin: 0 0 16px;
+        }
+        #enable-notifications {
+            margin: 0 0 24px;
+            padding: 10px 14px;
+        }
+        .potd-card {
+            display: none;
+            padding: 16px;
+            border: 1px solid #d9d6cb;
+            background: #fffdf8;
+        }
+        .potd-card.is-visible {
+            display: block;
+        }
+        .potd-card img {
+            display: block;
+            width: 100%;
+            height: auto;
+            margin: 0 0 16px;
+            background: #ece9df;
+        }
+        .potd-status {
+            padding: 16px;
+            border: 1px dashed #c8c4b6;
+            color: #5c584e;
+            background: #fdfbf5;
+        }
+        .potd-status[hidden] {
+            display: none;
+        }
+        .potd-summary p {
+            margin: 0 0 12px;
+        }
+        .potd-summary a {
+            color: #0b57d0;
+        }
+        .potd-meta {
+            margin: 12px 0 0;
+        }
     </style>
 </head>
 <body>
-<br>
-<h1>Attention</h1>
-<button id="enable-notifications" style="display:none;">Enable Notifications</button>
+<main>
+    <h1>Attention</h1>
+    <button id="enable-notifications" style="display:none;">Enable Notifications</button>
+
+    <section id="potd">
+        <div id="potd-status" class="potd-status">Today's Wikipedia picture of the day is not available yet.</div>
+        <article id="potd-card" class="potd-card">
+            <img id="potd-image" alt="">
+            <h2 id="potd-title"></h2>
+            <div id="potd-summary" class="potd-summary"></div>
+            <p class="potd-meta"><a id="potd-link" href="#" target="_blank" rel="noreferrer">Open on Wikipedia</a></p>
+        </article>
+    </section>
+</main>
 
 <script>
     let hasSubscribed = false;
     let PUBLIC_VAPID_KEY = '';
+
+    function renderPotd(data) {
+        const status = document.getElementById('potd-status');
+        const card = document.getElementById('potd-card');
+        const image = document.getElementById('potd-image');
+        const title = document.getElementById('potd-title');
+        const summary = document.getElementById('potd-summary');
+        const link = document.getElementById('potd-link');
+
+        if (!data || !data.ok || !data.potd) {
+            status.hidden = false;
+            card.classList.remove('is-visible');
+            return;
+        }
+
+        status.hidden = true;
+        card.classList.add('is-visible');
+
+        title.textContent = data.potd.title || 'Wikipedia picture of the day';
+        summary.innerHTML = data.potd.summaryHtml || `<p>${data.potd.summaryText || ''}</p>`;
+        link.href = data.potd.link || 'https://en.wikipedia.org/wiki/Main_Page';
+
+        if (data.potd.imageUrl) {
+            image.hidden = false;
+            image.src = data.potd.imageUrl;
+            image.alt = data.potd.title || 'Wikipedia picture of the day';
+        } else {
+            image.hidden = true;
+            image.removeAttribute('src');
+            image.alt = '';
+        }
+    }
+
+    async function loadPotd() {
+        try {
+            const res = await fetch('/potd', { cache: 'no-store' });
+            if (!res.ok) throw new Error('failed');
+            const data = await res.json();
+            renderPotd(data);
+        } catch (err) {
+            renderPotd(null);
+        }
+    }
 
     function urlBase64ToUint8Array(base64String) {
         const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -75,6 +181,7 @@
     // 启动时：检测是否已经完成过所有注册流程
     window.addEventListener('load', async () => {
         const button = document.getElementById('enable-notifications');
+        loadPotd();
         try {
             const res = await fetch('/config', { cache: 'no-store' });
             const config = await res.json();

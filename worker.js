@@ -1,5 +1,10 @@
 import { setVapidDetails, sendNotification } from './pwanotify.js';
 
+const SHANGHAI_TIME_ZONE = 'Asia/Shanghai';
+const WIKIPEDIA_POTD_FEED_URL = 'https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=potd&feedformat=atom';
+const WIKIPEDIA_BASE_URL = 'https://en.wikipedia.org';
+const POTD_CURRENT_KEY = 'potd:current';
+
 function base64ToUint8Array(b64) {
   const bin = atob(b64);
   const arr = new Uint8Array(bin.length);
@@ -92,10 +97,38 @@ async function verifyWebhookSignature(request, rawBody, secret) {
 
 async function fetchFeedPreview(feedUrl) {
   const res = await fetch(feedUrl, {
-    headers: { 'User-Agent': 'Attention-Worker/1.0' }
+    headers: {
+      'User-Agent': 'Attention-Worker/1.0',
+      'Accept': 'application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.1'
+    }
   });
   const text = await res.text();
   return { status: res.status, contentType: res.headers.get('content-type') || '', text };
+}
+
+function shanghaiDateString(date = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: SHANGHAI_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(date);
+}
+
+function escapeHtml(str) {
+  return (str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function toAbsoluteUrl(url) {
+  if (!url) return '';
+  if (url.startsWith('//')) return `https:${url}`;
+  if (url.startsWith('/')) return `${WIKIPEDIA_BASE_URL}${url}`;
+  return url;
 }
 
 function decodeXmlEntities(str) {
@@ -106,6 +139,20 @@ function decodeXmlEntities(str) {
     .replace(/&amp;/g, '&')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
+    .replace(/&#(\d+);/g, (_, code) => {
+      try {
+        return String.fromCodePoint(Number(code));
+      } catch {
+        return _;
+      }
+    })
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) => {
+      try {
+        return String.fromCodePoint(parseInt(code, 16));
+      } catch {
+        return _;
+      }
+    })
     .trim();
 }
 
@@ -150,6 +197,71 @@ function parseLatestFeedItem(feedText) {
   return { feedTitle, title, link, description };
 }
 
+function sanitizeSummaryHtml(summaryHtml, summaryText) {
+  if (!summaryHtml) return summaryText ? `<p>${escapeHtml(summaryText)}</p>` : '';
+  const firstParagraph = firstMatch(summaryHtml, [
+    /<p\b[^>]*>([\s\S]*?)<\/p>/i
+  ]);
+  if (!firstParagraph) return summaryText ? `<p>${escapeHtml(summaryText)}</p>` : '';
+  const sanitized = firstParagraph
+    .replace(/\s(?:class|style|lang|dir|title|typeof|data-[^=]+)=["'][^"']*["']/gi, '')
+    .replace(/href=(["'])(\/[^"']*)\1/gi, `href="${
+      WIKIPEDIA_BASE_URL
+    }$2"`)
+    .replace(/href=(["'])(\/\/[^"']*)\1/gi, 'href="https:$2"');
+  return `<p>${sanitized}</p>`;
+}
+
+function parseFeedEntries(feedText) {
+  return Array.from(feedText.matchAll(/<entry\b[^>]*>([\s\S]*?)<\/entry>/gi)).map(match => match[1]);
+}
+
+function parseWikipediaPotdFeed(feedText) {
+  const entries = parseFeedEntries(feedText);
+  if (entries.length === 0) return null;
+
+  const parsedEntries = entries.map((entryBlock) => {
+    const title = stripTags(firstMatch(entryBlock, [
+      /<title[^>]*>([\s\S]*?)<\/title>/i
+    ]));
+    const link = toAbsoluteUrl(decodeXmlEntities(firstMatch(entryBlock, [
+      /<link[^>]*rel=["']alternate["'][^>]*href=["']([^"']+)["'][^>]*\/?>/i,
+      /<link[^>]*href=["']([^"']+)["'][^>]*\/?>/i,
+      /<id[^>]*>(https?:[^<]+)<\/id>/i
+    ])));
+    const updated = firstMatch(entryBlock, [
+      /<updated[^>]*>([\s\S]*?)<\/updated>/i,
+      /<published[^>]*>([\s\S]*?)<\/published>/i
+    ]);
+    const decodedSummaryHtml = decodeXmlEntities(firstMatch(entryBlock, [
+      /<summary[^>]*>([\s\S]*?)<\/summary>/i,
+      /<content[^>]*>([\s\S]*?)<\/content>/i
+    ]));
+    const imageUrl = toAbsoluteUrl(firstMatch(decodedSummaryHtml, [
+      /<img[^>]*src=["']([^"']+)["'][^>]*>/i
+    ]));
+    const summaryText = stripTags(firstMatch(decodedSummaryHtml, [
+      /<p\b[^>]*>([\s\S]*?)<\/p>/i
+    ]) || decodedSummaryHtml).slice(0, 320);
+    const summaryHtml = sanitizeSummaryHtml(decodedSummaryHtml, summaryText);
+    const date = updated ? updated.slice(0, 10) : '';
+
+    return {
+      date,
+      title,
+      link,
+      summaryText,
+      summaryHtml,
+      imageUrl,
+      updatedAt: updated
+    };
+  }).filter(item => item.title && item.updatedAt);
+
+  if (parsedEntries.length === 0) return null;
+  parsedEntries.sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
+  return parsedEntries.at(-1);
+}
+
 function buildNotificationPayloadFromFeed(feedText, fallbackUrl = '') {
   const item = parseLatestFeedItem(feedText);
   if (!item || !item.title) return null;
@@ -168,12 +280,75 @@ function buildNotificationPayloadFromFeed(feedText, fallbackUrl = '') {
   };
 }
 
+function buildNotificationPayloadFromPotd(potd) {
+  return {
+    web_push: 8030,
+    notification: {
+      title: potd.title,
+      body: potd.summaryText || 'Wikipedia picture of the day',
+      navigate: potd.link || WIKIPEDIA_BASE_URL,
+      silent: false,
+      app_badge: '1'
+    }
+  };
+}
+
+async function getStateJson(env, key) {
+  const raw = await env.SUBS.get(key);
+  if (!raw) return null;
+  return JSON.parse(raw);
+}
+
+async function putStateJson(env, key, value) {
+  await env.SUBS.put(key, JSON.stringify(value));
+}
+
+async function refreshWikipediaPotdState(env) {
+  const preview = await fetchFeedPreview(WIKIPEDIA_POTD_FEED_URL);
+  if (preview.status < 200 || preview.status >= 300) {
+    throw new Error(`POTD feed fetch failed: ${preview.status}`);
+  }
+
+  const potd = parseWikipediaPotdFeed(preview.text);
+  if (!potd) throw new Error('Unable to parse Wikipedia POTD feed');
+
+  const current = await getStateJson(env, POTD_CURRENT_KEY);
+  const changed = !current ||
+    current.date !== potd.date ||
+    current.title !== potd.title ||
+    current.link !== potd.link ||
+    current.summaryText !== potd.summaryText ||
+    current.imageUrl !== potd.imageUrl;
+
+  if (changed) {
+    await putStateJson(env, POTD_CURRENT_KEY, potd);
+  }
+
+  return { potd, changed };
+}
+
+async function sendPotdNotificationIfNeeded(env, now = new Date()) {
+  const potd = await getStateJson(env, POTD_CURRENT_KEY);
+  if (!potd) {
+    return { skipped: true, reason: 'potd_not_ready', date: shanghaiDateString(now) };
+  }
+
+  const result = await sendToAllSubscriptions(env, buildNotificationPayloadFromPotd(potd));
+  return {
+    skipped: false,
+    date: shanghaiDateString(now),
+    item: potd,
+    ...result
+  };
+}
+
 async function listSubscriptions(env) {
   const out = [];
   let cursor = undefined;
   for (;;) {
     const page = await env.SUBS.list({ cursor, limit: 1000 });
     for (const key of page.keys || []) {
+      if (!/^[0-9a-f]{64}$/i.test(key.name)) continue;
       const stored = await env.SUBS.get(key.name);
       if (!stored) continue;
       try {
@@ -255,6 +430,20 @@ export default {
 
     if (request.method === 'GET' && url.pathname === '/config') {
       return json({ vapidPublicKey: env.VAPID_PUBLIC_KEY || '' });
+    }
+
+    if (request.method === 'GET' && url.pathname === '/potd') {
+      const potd = await getStateJson(env, POTD_CURRENT_KEY);
+      if (!potd) {
+        return json({
+          ok: false,
+          pending: true
+        });
+      }
+      return json({
+        ok: true,
+        potd
+      });
     }
 
     if (request.method === 'POST' && url.pathname === '/subscribe') {
@@ -450,5 +639,21 @@ export default {
     }
 
     return env.ASSETS.fetch(request);
+  },
+
+  async scheduled(controller, env, ctx) {
+    const now = new Date(controller.scheduledTime || Date.now());
+    const work = (async () => {
+      if (controller.cron === '5 0 * * *') {
+        await refreshWikipediaPotdState(env);
+      } else if (controller.cron === '30 0 * * *') {
+        await sendPotdNotificationIfNeeded(env, now);
+      }
+    })();
+    if (ctx && typeof ctx.waitUntil === 'function') {
+      ctx.waitUntil(work);
+    } else {
+      await work;
+    }
   }
 };
