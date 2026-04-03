@@ -65,6 +65,16 @@ function formEncode(params) {
     .join('&');
 }
 
+function initializeVapid(env) {
+  if (env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY) {
+    setVapidDetails(
+      env.VAPID_SUBJECT || 'mailto:nobody@example.com',
+      env.VAPID_PUBLIC_KEY,
+      env.VAPID_PRIVATE_KEY
+    );
+  }
+}
+
 async function hmacHex(secret, data, hash = 'SHA-256') {
   const key = await crypto.subtle.importKey(
     'raw',
@@ -424,9 +434,7 @@ export default {
       });
     }
 
-    if (env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY) {
-      setVapidDetails(env.VAPID_SUBJECT || 'mailto:nobody@example.com', env.VAPID_PUBLIC_KEY, env.VAPID_PRIVATE_KEY);
-    }
+    initializeVapid(env);
 
     if (request.method === 'GET' && url.pathname === '/config') {
       return json({ vapidPublicKey: env.VAPID_PUBLIC_KEY || '' });
@@ -644,6 +652,7 @@ export default {
   async scheduled(controller, env, ctx) {
     const now = new Date(controller.scheduledTime || Date.now());
     const work = (async () => {
+      initializeVapid(env);
       if (controller.cron === '5 0 * * *') {
         await refreshWikipediaPotdState(env);
       } else if (controller.cron === '30 0 * * *') {
