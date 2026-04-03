@@ -10,121 +10,80 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black">
     <meta name="apple-mobile-web-app-title" content="Attention">
-    <style>
-        body {
-            margin: 0;
-            padding: 24px 20px 40px;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            line-height: 1.5;
-            color: #111;
-            background: #f7f7f2;
-        }
-        main {
-            max-width: 720px;
-            margin: 0 auto;
-        }
-        h1 {
-            margin: 0 0 16px;
-        }
-        #enable-notifications {
-            margin: 0 0 24px;
-            padding: 10px 14px;
-        }
-        .potd-card {
-            display: none;
-            padding: 16px;
-            border: 1px solid #d9d6cb;
-            background: #fffdf8;
-        }
-        .potd-card.is-visible {
-            display: block;
-        }
-        .potd-card img {
-            display: block;
-            width: 100%;
-            height: auto;
-            margin: 0 0 16px;
-            background: #ece9df;
-        }
-        .potd-status {
-            padding: 16px;
-            border: 1px dashed #c8c4b6;
-            color: #5c584e;
-            background: #fdfbf5;
-        }
-        .potd-status[hidden] {
-            display: none;
-        }
-        .potd-summary p {
-            margin: 0 0 12px;
-        }
-        .potd-summary a {
-            color: #0b57d0;
-        }
-        .potd-meta {
-            margin: 12px 0 0;
-        }
-    </style>
 </head>
 <body>
-<main>
     <button id="enable-notifications" style="display:none;">Enable Notifications</button>
-
-    <section id="potd">
-        <div id="potd-status" class="potd-status">Today's Wikipedia picture of the day is not available yet.</div>
-        <article id="potd-card" class="potd-card">
-            <img id="potd-image" alt="">
-            <h2 id="potd-title"></h2>
-            <div id="potd-summary" class="potd-summary"></div>
-            <p class="potd-meta"><a id="potd-link" href="#" target="_blank" rel="noreferrer">Open on Wikipedia</a></p>
-        </article>
-    </section>
-</main>
+    <section id="history"></section>
 
 <script>
     let hasSubscribed = false;
     let PUBLIC_VAPID_KEY = '';
 
-    function renderPotd(data) {
-        const status = document.getElementById('potd-status');
-        const card = document.getElementById('potd-card');
-        const image = document.getElementById('potd-image');
-        const title = document.getElementById('potd-title');
-        const summary = document.getElementById('potd-summary');
-        const link = document.getElementById('potd-link');
+    function renderHistory(data) {
+        const root = document.getElementById('history');
+        root.replaceChildren();
+        if (!data || !data.ok || !Array.isArray(data.items) || data.items.length === 0) return;
 
-        if (!data || !data.ok || !data.potd) {
-            status.hidden = false;
-            card.classList.remove('is-visible');
-            return;
+        const grouped = new Map();
+        for (const item of data.items) {
+            if (!grouped.has(item.sourceKey)) {
+                grouped.set(item.sourceKey, {
+                    sourceLabel: item.sourceLabel || item.sourceKey,
+                    items: []
+                });
+            }
+            grouped.get(item.sourceKey).items.push(item);
         }
 
-        status.hidden = true;
-        card.classList.add('is-visible');
+        for (const [, group] of grouped) {
+            const section = document.createElement('section');
+            const heading = document.createElement('h2');
+            heading.textContent = group.sourceLabel;
+            section.appendChild(heading);
 
-        title.textContent = data.potd.title || 'Wikipedia picture of the day';
-        summary.innerHTML = data.potd.summaryHtml || `<p>${data.potd.summaryText || ''}</p>`;
-        link.href = data.potd.link || 'https://en.wikipedia.org/wiki/Main_Page';
+            const list = document.createElement('ul');
+            for (const item of group.items) {
+                const entry = document.createElement('li');
+                const title = document.createElement('a');
+                title.href = item.link || '#';
+                title.target = '_blank';
+                title.rel = 'noreferrer';
+                title.textContent = item.title || item.sourceLabel || 'Notification';
+                entry.appendChild(title);
 
-        if (data.potd.imageUrl) {
-            image.hidden = false;
-            image.src = data.potd.imageUrl;
-            image.alt = data.potd.title || 'Wikipedia picture of the day';
-        } else {
-            image.hidden = true;
-            image.removeAttribute('src');
-            image.alt = '';
+                if (item.publishedAt) {
+                    const time = document.createElement('div');
+                    time.textContent = item.publishedAt;
+                    entry.appendChild(time);
+                }
+
+                if (item.imageUrl) {
+                    const image = document.createElement('img');
+                    image.src = item.imageUrl;
+                    image.alt = item.title || '';
+                    entry.appendChild(image);
+                }
+
+                if (item.body) {
+                    const body = document.createElement('p');
+                    body.textContent = item.body;
+                    entry.appendChild(body);
+                }
+
+                list.appendChild(entry);
+            }
+            section.appendChild(list);
+            root.appendChild(section);
         }
     }
 
-    async function loadPotd() {
+    async function loadHistory() {
         try {
-            const res = await fetch('/potd', { cache: 'no-store' });
+            const res = await fetch('/history', { cache: 'no-store' });
             if (!res.ok) throw new Error('failed');
             const data = await res.json();
-            renderPotd(data);
+            renderHistory(data);
         } catch (err) {
-            renderPotd(null);
         }
     }
 
@@ -151,7 +110,6 @@
 
             if (Notification.permission !== 'granted') return;
 
-            // Subscribe directly via window.pushManager (No Service Worker needed)
             const existingSubscription = typeof window.pushManager.getSubscription === 'function'
                 ? await window.pushManager.getSubscription()
                 : null;
@@ -161,7 +119,6 @@
                 applicationServerKey: urlBase64ToUint8Array(PUBLIC_VAPID_KEY)
             });
 
-            // Auto-save to server
             await fetch('/subscribe', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -173,14 +130,12 @@
             if (button) button.style.display = 'none';
 
         } catch (err) {
-            // console.error('Failed to subscribe:', err);
         }
     }
 
-    // 启动时：检测是否已经完成过所有注册流程
     window.addEventListener('load', async () => {
         const button = document.getElementById('enable-notifications');
-        loadPotd();
+        loadHistory();
         try {
             const res = await fetch('/config', { cache: 'no-store' });
             const config = await res.json();

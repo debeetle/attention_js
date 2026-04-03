@@ -3,7 +3,9 @@ import { setVapidDetails, sendNotification } from './pwanotify.js';
 const SHANGHAI_TIME_ZONE = 'Asia/Shanghai';
 const WIKIPEDIA_POTD_FEED_URL = 'https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=potd&feedformat=atom';
 const WIKIPEDIA_BASE_URL = 'https://en.wikipedia.org';
-const POTD_CURRENT_KEY = 'potd:current';
+const HISTORY_KEY = 'history:items';
+const HISTORY_LIMIT = 100;
+const WIKIPEDIA_POTD_SOURCE_KEY = 'wikipedia-potd';
 
 function base64ToUint8Array(b64) {
   const bin = atob(b64);
@@ -134,11 +136,14 @@ function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
-function toAbsoluteUrl(url) {
+function toAbsoluteUrl(url, baseUrl = '') {
   if (!url) return '';
   if (url.startsWith('//')) return `https:${url}`;
-  if (url.startsWith('/')) return `${WIKIPEDIA_BASE_URL}${url}`;
-  return url;
+  try {
+    return new URL(url, baseUrl || WIKIPEDIA_BASE_URL).toString();
+  } catch {
+    return url;
+  }
 }
 
 function decodeXmlEntities(str) {
@@ -189,22 +194,46 @@ function parseLatestFeedItem(feedText) {
     /<channel\b[^>]*>[\s\S]*?<title>([\s\S]*?)<\/title>/i,
     /<feed\b[^>]*>[\s\S]*?<title[^>]*>([\s\S]*?)<\/title>/i
   ]));
+  const baseUrl = decodeXmlEntities(firstMatch(feedText, [
+    /<link[^>]*rel=["']alternate["'][^>]*href=["']([^"']+)["'][^>]*\/?>/i,
+    /<link[^>]*href=["']([^"']+)["'][^>]*\/?>/i
+  ]));
   const title = stripTags(firstMatch(itemBlock, [
     /<title[^>]*>([\s\S]*?)<\/title>/i
   ]));
-  const link = decodeXmlEntities(firstMatch(itemBlock, [
+  const link = toAbsoluteUrl(decodeXmlEntities(firstMatch(itemBlock, [
     /<link>([\s\S]*?)<\/link>/i,
     /<link[^>]*href=["']([^"']+)["'][^>]*\/?>(?:<\/link>)?/i,
     /<guid[^>]*>(https?:[^<]+)<\/guid>/i,
     /<id[^>]*>(https?:[^<]+)<\/id>/i
+  ])), baseUrl);
+  const itemId = decodeXmlEntities(firstMatch(itemBlock, [
+    /<id[^>]*>([\s\S]*?)<\/id>/i,
+    /<guid[^>]*>([\s\S]*?)<\/guid>/i,
+    /<link[^>]*href=["']([^"']+)["'][^>]*\/?>(?:<\/link>)?/i,
+    /<link>([\s\S]*?)<\/link>/i
   ]));
-  const description = stripTags(firstMatch(itemBlock, [
+  const publishedAt = decodeXmlEntities(firstMatch(itemBlock, [
+    /<updated[^>]*>([\s\S]*?)<\/updated>/i,
+    /<published[^>]*>([\s\S]*?)<\/published>/i,
+    /<pubDate[^>]*>([\s\S]*?)<\/pubDate>/i
+  ]));
+  const decodedSummaryHtml = decodeXmlEntities(firstMatch(itemBlock, [
     /<description[^>]*>([\s\S]*?)<\/description>/i,
     /<content[^>]*>([\s\S]*?)<\/content>/i,
     /<summary[^>]*>([\s\S]*?)<\/summary>/i
-  ])).slice(0, 160);
+  ]));
+  const description = stripTags(firstMatch(decodedSummaryHtml, [
+    /<p\b[^>]*>([\s\S]*?)<\/p>/i
+  ]) || decodedSummaryHtml).slice(0, 160);
+  const imageUrl = toAbsoluteUrl(firstMatch(decodedSummaryHtml, [
+    /<img[^>]*src=["']([^"']+)["'][^>]*>/i,
+    /<media:content[^>]*url=["']([^"']+)["'][^>]*\/?>/i,
+    /<media:thumbnail[^>]*url=["']([^"']+)["'][^>]*\/?>/i
+  ]), baseUrl || link);
+  const summaryHtml = sanitizeSummaryHtml(decodedSummaryHtml, description);
 
-  return { feedTitle, title, link, description };
+  return { feedTitle, title, link, description, summaryHtml, imageUrl, itemId, publishedAt };
 }
 
 function sanitizeSummaryHtml(summaryHtml, summaryText) {
@@ -272,35 +301,44 @@ function parseWikipediaPotdFeed(feedText) {
   return parsedEntries.at(-1);
 }
 
-function buildNotificationPayloadFromFeed(feedText, fallbackUrl = '') {
-  const item = parseLatestFeedItem(feedText);
-  if (!item || !item.title) return null;
-  return {
-    item,
-    payload: {
-      web_push: 8030,
-      notification: {
-        title: item.title,
-        body: item.description || item.feedTitle || 'New feed item',
-        navigate: item.link || fallbackUrl,
-        silent: false,
-        app_badge: '1'
-      }
-    }
-  };
-}
-
-function buildNotificationPayloadFromPotd(potd) {
+function buildNotificationPayload(item) {
   return {
     web_push: 8030,
     notification: {
-      title: potd.title,
-      body: potd.summaryText || 'Wikipedia picture of the day',
-      navigate: potd.link || WIKIPEDIA_BASE_URL,
+      title: item.title,
+      body: item.summaryText || item.description || item.feedTitle || 'New item',
+      navigate: item.link || WIKIPEDIA_BASE_URL,
       silent: false,
       app_badge: '1'
     }
   };
+}
+
+function buildHistoryItem(source, item, itemKey, sentAt = new Date().toISOString()) {
+  return {
+    id: `${source.sourceKey}:${itemKey}`,
+    sourceKey: source.sourceKey,
+    sourceType: source.sourceType,
+    sourceLabel: source.sourceLabel,
+    title: item.title,
+    body: item.summaryText || item.description || '',
+    link: item.link || '',
+    imageUrl: item.imageUrl || '',
+    publishedAt: item.publishedAt || item.updatedAt || '',
+    createdAt: sentAt
+  };
+}
+
+function getSourceCurrentKey(sourceKey) {
+  return `source:current:${sourceKey}`;
+}
+
+function getSourceLastItemKey(sourceKey) {
+  return `source:last:${sourceKey}`;
+}
+
+function deriveItemKey(item) {
+  return item.itemId || item.link || `${item.title}::${item.publishedAt || item.updatedAt || ''}`;
 }
 
 async function getStateJson(env, key) {
@@ -313,6 +351,13 @@ async function putStateJson(env, key, value) {
   await env.SUBS.put(key, JSON.stringify(value));
 }
 
+async function appendHistoryItem(env, historyItem) {
+  const history = await getStateJson(env, HISTORY_KEY) || [];
+  const next = [historyItem, ...history.filter(item => item.id !== historyItem.id)].slice(0, HISTORY_LIMIT);
+  await putStateJson(env, HISTORY_KEY, next);
+  return next;
+}
+
 async function refreshWikipediaPotdState(env) {
   const preview = await fetchFeedPreview(WIKIPEDIA_POTD_FEED_URL);
   if (preview.status < 200 || preview.status >= 300) {
@@ -322,7 +367,7 @@ async function refreshWikipediaPotdState(env) {
   const potd = parseWikipediaPotdFeed(preview.text);
   if (!potd) throw new Error('Unable to parse Wikipedia POTD feed');
 
-  const current = await getStateJson(env, POTD_CURRENT_KEY);
+  const current = await getStateJson(env, getSourceCurrentKey(WIKIPEDIA_POTD_SOURCE_KEY));
   const changed = !current ||
     current.date !== potd.date ||
     current.title !== potd.title ||
@@ -331,23 +376,35 @@ async function refreshWikipediaPotdState(env) {
     current.imageUrl !== potd.imageUrl;
 
   if (changed) {
-    await putStateJson(env, POTD_CURRENT_KEY, potd);
+    await putStateJson(env, getSourceCurrentKey(WIKIPEDIA_POTD_SOURCE_KEY), potd);
   }
 
   return { potd, changed };
 }
 
-async function sendPotdNotificationIfNeeded(env, now = new Date()) {
-  const potd = await getStateJson(env, POTD_CURRENT_KEY);
-  if (!potd) {
-    return { skipped: true, reason: 'potd_not_ready', date: shanghaiDateString(now) };
+async function processSourceItem(env, source, item, options = {}) {
+  const { cacheCurrent = true } = options;
+  const itemKey = deriveItemKey(item);
+  if (!itemKey) return { skipped: true, reason: 'missing_item_key', sourceKey: source.sourceKey };
+
+  if (cacheCurrent) {
+    await putStateJson(env, getSourceCurrentKey(source.sourceKey), item);
   }
 
-  const result = await sendToAllSubscriptions(env, buildNotificationPayloadFromPotd(potd));
+  const lastItemKey = await env.SUBS.get(getSourceLastItemKey(source.sourceKey));
+  if (lastItemKey === itemKey) {
+    return { skipped: true, reason: 'duplicate', sourceKey: source.sourceKey, itemKey };
+  }
+
+  const result = await sendToAllSubscriptions(env, buildNotificationPayload(item));
+  await env.SUBS.put(getSourceLastItemKey(source.sourceKey), itemKey);
+  const historyItem = buildHistoryItem(source, item, itemKey);
+  await appendHistoryItem(env, historyItem);
   return {
     skipped: false,
-    date: shanghaiDateString(now),
-    item: potd,
+    sourceKey: source.sourceKey,
+    item,
+    itemKey,
     ...result
   };
 }
@@ -397,14 +454,34 @@ async function sendToAllSubscriptions(env, payload) {
 
 async function handleWebSubDelivery(env, rawBody, fallbackUrl = '') {
   const text = new TextDecoder().decode(rawBody);
-  const built = buildNotificationPayloadFromFeed(text, fallbackUrl);
-  if (!built) return { ok: false, reason: 'unable_to_parse_feed_item' };
-  const result = await sendToAllSubscriptions(env, built.payload);
-  return {
-    ok: result.failed === 0,
-    item: built.item,
-    ...result
+  const item = parseLatestFeedItem(text);
+  if (!item || !item.title) return { ok: false, reason: 'unable_to_parse_feed_item' };
+  return processSourceItem(env, {
+    sourceKey: fallbackUrl ? `websub:${fallbackUrl}` : `websub:${item.feedTitle || 'unknown'}`,
+    sourceType: 'websub',
+    sourceLabel: item.feedTitle || fallbackUrl || 'WebSub'
+  }, item, { cacheCurrent: false });
+}
+
+async function handleWebhookDelivery(env, rawBody, contentType = '') {
+  if (!contentType.includes('application/json')) return { ok: false, reason: 'unsupported_content_type' };
+  const body = JSON.parse(new TextDecoder().decode(rawBody));
+  if (!body || !body.title) return { ok: false, reason: 'missing_title' };
+  const item = {
+    title: body.title,
+    description: body.body || '',
+    summaryText: body.body || '',
+    link: body.link || '',
+    imageUrl: body.imageUrl || '',
+    itemId: body.itemKey || body.id || body.link || '',
+    publishedAt: body.publishedAt || new Date().toISOString(),
+    feedTitle: body.sourceLabel || body.sourceKey || 'Webhook'
   };
+  return processSourceItem(env, {
+    sourceKey: body.sourceKey || 'webhook:default',
+    sourceType: 'webhook',
+    sourceLabel: body.sourceLabel || body.sourceKey || 'Webhook'
+  }, item, { cacheCurrent: false });
 }
 
 function json(data, status = 200, extraHeaders = {}) {
@@ -440,17 +517,11 @@ export default {
       return json({ vapidPublicKey: env.VAPID_PUBLIC_KEY || '' });
     }
 
-    if (request.method === 'GET' && url.pathname === '/potd') {
-      const potd = await getStateJson(env, POTD_CURRENT_KEY);
-      if (!potd) {
-        return json({
-          ok: false,
-          pending: true
-        });
-      }
+    if (request.method === 'GET' && url.pathname === '/history') {
+      const items = await getStateJson(env, HISTORY_KEY) || [];
       return json({
         ok: true,
-        potd
+        items
       });
     }
 
@@ -594,6 +665,12 @@ export default {
         const ok = await verifyWebhookSignature(request, rawBody, env.WEBHOOK_SECRET);
         if (!ok) return new Response('Unauthorized', { status: 401 });
       }
+      const work = handleWebhookDelivery(env, rawBody, request.headers.get('content-type') || '');
+      if (ctx && typeof ctx.waitUntil === 'function') {
+        ctx.waitUntil(work);
+      } else {
+        await work;
+      }
       return new Response(null, { status: 204 });
     }
 
@@ -625,38 +702,36 @@ export default {
 
       const item = parseLatestFeedItem(preview.text);
       if (!item || !item.title) return new Response('Unable to parse latest feed item', { status: 422 });
-
-      const payload = {
-        web_push: 8030,
-        notification: {
-          title: item.title,
-          body: item.description || item.feedTitle || 'New RSS item',
-          navigate: item.link || feedUrl,
-          silent: false,
-          app_badge: '1'
-        }
-      };
-
-      const result = await sendToAllSubscriptions(env, payload);
+      const result = await processSourceItem(env, {
+        sourceKey: `rss:${feedUrl}`,
+        sourceType: 'rss',
+        sourceLabel: item.feedTitle || feedUrl
+      }, item, { cacheCurrent: false });
       return json({
-        ok: result.failed === 0,
+        ok: !result.skipped && result.failed === 0,
         feedUrl,
         item,
         ...result
-      }, result.failed === 0 ? 200 : 207);
+      }, result.skipped ? 200 : (result.failed === 0 ? 200 : 207));
     }
 
     return env.ASSETS.fetch(request);
   },
 
   async scheduled(controller, env, ctx) {
-    const now = new Date(controller.scheduledTime || Date.now());
     const work = (async () => {
       initializeVapid(env);
       if (controller.cron === '5 0 * * *') {
         await refreshWikipediaPotdState(env);
       } else if (controller.cron === '30 0 * * *') {
-        await sendPotdNotificationIfNeeded(env, now);
+        const potd = await getStateJson(env, getSourceCurrentKey(WIKIPEDIA_POTD_SOURCE_KEY));
+        if (potd) {
+          await processSourceItem(env, {
+            sourceKey: WIKIPEDIA_POTD_SOURCE_KEY,
+            sourceType: 'rss',
+            sourceLabel: 'Wikipedia POTD'
+          }, potd);
+        }
       }
     })();
     if (ctx && typeof ctx.waitUntil === 'function') {
