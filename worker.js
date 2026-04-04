@@ -175,7 +175,8 @@ function removeWikiNoise(str) {
   return (str || '')
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
     .replace(/<link[\s\S]*?\/?>/gi, ' ')
-    .replace(/\u007f?['"`]*UNIQ--[\w-]+-QINU['"`]*\u007f?/g, ' ')
+    .replace(/[\u0000-\u001f\u007f]*\s*['"`]*\s*UNIQ--[\w-]+-QINU\s*['"`]*\s*[\u0000-\u001f\u007f]*/g, ' ')
+    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -199,9 +200,16 @@ function truncateToSentence(text, maxLength = 180) {
     slice.lastIndexOf('？')
   );
   if (lastSentenceEnd >= 20) {
-    return slice.slice(0, lastSentenceEnd + 1).trim();
+    return `${slice.slice(0, lastSentenceEnd + 1).trim()}...`;
   }
   return `${slice.trim()}...`;
+}
+
+function cleanHistoryBodyText(text) {
+  const cleaned = removeWikiNoise((text || '').replace(/\s+/g, ' ')).trim();
+  if (!cleaned) return '';
+  if (/[.!?。！？…]$/.test(cleaned)) return cleaned;
+  return `${cleaned}...`;
 }
 
 function firstMatch(text, patterns) {
@@ -547,7 +555,10 @@ export default {
     }
 
     if (request.method === 'GET' && url.pathname === '/history') {
-      const items = await getStateJson(env, HISTORY_KEY) || [];
+      const items = (await getStateJson(env, HISTORY_KEY) || []).map((item) => ({
+        ...item,
+        body: cleanHistoryBodyText(item.body)
+      }));
       return json({
         ok: true,
         items

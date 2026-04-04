@@ -37,9 +37,6 @@
 
         for (const [, group] of grouped) {
             const section = document.createElement('section');
-            const heading = document.createElement('div');
-            heading.textContent = group.sourceLabel;
-            section.appendChild(heading);
 
             for (const item of group.items) {
                 const entry = document.createElement('article');
@@ -66,15 +63,24 @@
                 if (item.body) {
                     const body = document.createElement('p');
                     body.textContent = item.body;
+                    if (item.link) {
+                        body.append(document.createTextNode(' '));
+                        const inlineLink = document.createElement('a');
+                        inlineLink.href = item.link;
+                        inlineLink.target = '_blank';
+                        inlineLink.rel = 'noreferrer';
+                        inlineLink.textContent = '查看原文';
+                        inlineLink.style.font = 'inherit';
+                        body.appendChild(inlineLink);
+                    }
                     entry.appendChild(body);
-                }
-
-                if (item.link) {
+                } else if (item.link) {
                     const link = document.createElement('a');
                     link.href = item.link;
                     link.target = '_blank';
                     link.rel = 'noreferrer';
                     link.textContent = '查看原文';
+                    link.style.font = 'inherit';
                     entry.appendChild(link);
                 }
 
@@ -97,7 +103,7 @@
                 hour12: false
             }).formatToParts(date);
             const get = type => parts.find(part => part.type === type)?.value || '';
-            return `${get('hour')}:${get('minute')} ${get('day')}.${get('month')}.${get('year')}`;
+            return `${Number(get('hour'))}:${get('minute')} ${Number(get('day'))}.${Number(get('month'))}.${get('year')}`;
         } catch (err) {
             return value;
         }
