@@ -37,9 +37,6 @@
 
         for (const [, group] of grouped) {
             const section = document.createElement('section');
-            const heading = document.createElement('div');
-            heading.textContent = group.sourceLabel;
-            section.appendChild(heading);
 
             for (const item of group.items) {
                 const entry = document.createElement('article');
@@ -76,18 +73,27 @@
                 const content = document.createElement('div');
                 content.style.flex = '1 1 auto';
 
+                const header = document.createElement('div');
+                header.style.display = 'flex';
+                header.style.justifyContent = 'space-between';
+                header.style.alignItems = 'baseline';
+                header.style.gap = '8px';
+                header.style.fontFamily = 'sans-serif';
+
+                const headerTitle = document.createElement('div');
                 const shouldRenderTitle = item.sourceKey !== 'wikipedia-potd' && item.title && item.title !== group.sourceLabel;
-                if (shouldRenderTitle) {
-                    const title = document.createElement('div');
-                    title.textContent = item.title || item.sourceLabel || 'Notification';
-                    content.appendChild(title);
-                }
+                headerTitle.textContent = shouldRenderTitle ? (item.title || item.sourceLabel || 'Notification') : group.sourceLabel;
+                header.appendChild(headerTitle);
 
                 if (item.publishedAt) {
                     const time = document.createElement('div');
                     time.textContent = formatChinaTime(item.publishedAt);
-                    content.appendChild(time);
+                    time.style.marginLeft = 'auto';
+                    time.style.textAlign = 'right';
+                    time.style.whiteSpace = 'nowrap';
+                    header.appendChild(time);
                 }
+                content.appendChild(header);
 
                 if (item.bodyHtml) {
                     const body = document.createElement('p');
