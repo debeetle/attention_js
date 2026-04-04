@@ -37,12 +37,18 @@
 
         for (const [, group] of grouped) {
             const section = document.createElement('section');
+            const heading = document.createElement('div');
+            heading.textContent = group.sourceLabel;
+            section.appendChild(heading);
 
             for (const item of group.items) {
                 const entry = document.createElement('article');
-                const title = document.createElement('div');
-                title.textContent = item.title || item.sourceLabel || 'Notification';
-                entry.appendChild(title);
+                const shouldRenderTitle = item.sourceKey !== 'wikipedia-potd' && item.title && item.title !== group.sourceLabel;
+                if (shouldRenderTitle) {
+                    const title = document.createElement('div');
+                    title.textContent = item.title || item.sourceLabel || 'Notification';
+                    entry.appendChild(title);
+                }
 
                 if (item.publishedAt) {
                     const time = document.createElement('div');
@@ -71,6 +77,8 @@
                         inlineLink.rel = 'noreferrer';
                         inlineLink.textContent = '查看原文';
                         inlineLink.style.font = 'inherit';
+                        inlineLink.style.color = 'inherit';
+                        inlineLink.style.textDecoration = 'underline';
                         body.appendChild(inlineLink);
                     }
                     entry.appendChild(body);
@@ -81,6 +89,8 @@
                     link.rel = 'noreferrer';
                     link.textContent = '查看原文';
                     link.style.font = 'inherit';
+                    link.style.color = 'inherit';
+                    link.style.textDecoration = 'underline';
                     entry.appendChild(link);
                 }
 
