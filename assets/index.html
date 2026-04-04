@@ -59,6 +59,9 @@
                 if (mediaSource) {
                     const mediaWrap = document.createElement('div');
                     mediaWrap.style.flex = '0 0 30%';
+                    mediaWrap.style.display = 'flex';
+                    mediaWrap.style.flexDirection = 'column';
+                    mediaWrap.style.alignItems = 'stretch';
 
                     const image = document.createElement('img');
                     image.src = mediaSource;
@@ -67,6 +70,32 @@
                     image.style.height = 'auto';
                     image.style.display = 'block';
                     mediaWrap.appendChild(image);
+
+                    const mediaFooter = document.createElement('div');
+                    mediaFooter.style.display = 'flex';
+                    mediaFooter.style.justifyContent = 'space-between';
+                    mediaFooter.style.alignItems = 'baseline';
+                    mediaFooter.style.gap = '8px';
+                    mediaFooter.style.fontFamily = 'sans-serif';
+                    mediaFooter.style.marginTop = '8px';
+
+                    const footerTitle = document.createElement('div');
+                    const shouldRenderTitle = item.sourceKey !== 'wikipedia-potd' && item.title && item.title !== group.sourceLabel;
+                    footerTitle.textContent = item.sourceKey === 'wikipedia-potd'
+                        ? 'Wikipedia Picture of Today'
+                        : (shouldRenderTitle ? (item.title || item.sourceLabel || 'Notification') : group.sourceLabel);
+                    mediaFooter.appendChild(footerTitle);
+
+                    if (item.publishedAt) {
+                        const time = document.createElement('div');
+                        time.textContent = formatChinaTime(item.publishedAt);
+                        time.style.marginLeft = 'auto';
+                        time.style.textAlign = 'right';
+                        time.style.whiteSpace = 'nowrap';
+                        mediaFooter.appendChild(time);
+                    }
+
+                    mediaWrap.appendChild(mediaFooter);
                     layout.appendChild(mediaWrap);
                 }
 
@@ -75,6 +104,7 @@
 
                 if (item.bodyHtml) {
                     const body = document.createElement('p');
+                    body.style.margin = '0';
                     body.innerHTML = item.bodyHtml;
                     if (item.link) {
                         body.append(document.createTextNode(' '));
@@ -89,6 +119,7 @@
                     content.appendChild(body);
                 } else if (item.body) {
                     const body = document.createElement('p');
+                    body.style.margin = '0';
                     body.textContent = item.body;
                     if (item.link) {
                         body.append(document.createTextNode(' '));
@@ -113,31 +144,6 @@
 
                 layout.appendChild(content);
                 entry.appendChild(layout);
-
-                const footer = document.createElement('div');
-                footer.style.display = 'flex';
-                footer.style.justifyContent = 'space-between';
-                footer.style.alignItems = 'baseline';
-                footer.style.gap = '8px';
-                footer.style.fontFamily = 'sans-serif';
-
-                const footerTitle = document.createElement('div');
-                const shouldRenderTitle = item.sourceKey !== 'wikipedia-potd' && item.title && item.title !== group.sourceLabel;
-                footerTitle.textContent = item.sourceKey === 'wikipedia-potd'
-                    ? 'Wikipedia Picture of Today'
-                    : (shouldRenderTitle ? (item.title || item.sourceLabel || 'Notification') : group.sourceLabel);
-                footer.appendChild(footerTitle);
-
-                if (item.publishedAt) {
-                    const time = document.createElement('div');
-                    time.textContent = formatChinaTime(item.publishedAt);
-                    time.style.marginLeft = 'auto';
-                    time.style.textAlign = 'right';
-                    time.style.whiteSpace = 'nowrap';
-                    footer.appendChild(time);
-                }
-
-                entry.appendChild(footer);
                 section.appendChild(entry);
             }
             root.appendChild(section);
