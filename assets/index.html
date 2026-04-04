@@ -43,27 +43,50 @@
 
             for (const item of group.items) {
                 const entry = document.createElement('article');
+                entry.style.border = '1px solid';
+                entry.style.margin = '0 0 12px 0';
+                entry.style.padding = '10px';
+                if (item.link) {
+                    entry.style.cursor = 'pointer';
+                    entry.addEventListener('click', () => {
+                        window.location.href = item.link;
+                    });
+                }
+
+                const layout = document.createElement('div');
+                layout.style.display = 'flex';
+                layout.style.alignItems = 'flex-start';
+                layout.style.gap = '10px';
+
+                const mediaSource = item.imageUrl || faviconFor(item.link);
+                if (mediaSource) {
+                    const mediaWrap = document.createElement('div');
+                    mediaWrap.style.flex = '0 0 30%';
+
+                    const image = document.createElement('img');
+                    image.src = mediaSource;
+                    image.alt = item.title || '';
+                    image.style.width = item.imageUrl ? '100%' : '48px';
+                    image.style.height = 'auto';
+                    image.style.display = 'block';
+                    mediaWrap.appendChild(image);
+                    layout.appendChild(mediaWrap);
+                }
+
+                const content = document.createElement('div');
+                content.style.flex = '1 1 auto';
+
                 const shouldRenderTitle = item.sourceKey !== 'wikipedia-potd' && item.title && item.title !== group.sourceLabel;
                 if (shouldRenderTitle) {
                     const title = document.createElement('div');
                     title.textContent = item.title || item.sourceLabel || 'Notification';
-                    entry.appendChild(title);
+                    content.appendChild(title);
                 }
 
                 if (item.publishedAt) {
                     const time = document.createElement('div');
                     time.textContent = formatChinaTime(item.publishedAt);
-                    entry.appendChild(time);
-                }
-
-                if (item.imageUrl) {
-                    const image = document.createElement('img');
-                    image.src = item.imageUrl;
-                    image.alt = item.title || '';
-                    image.style.maxWidth = '100%';
-                    image.style.height = 'auto';
-                    image.style.display = 'block';
-                    entry.appendChild(image);
+                    content.appendChild(time);
                 }
 
                 if (item.bodyHtml) {
@@ -76,9 +99,10 @@
                         inlineLink.target = '_blank';
                         inlineLink.rel = 'noreferrer';
                         inlineLink.textContent = '查看原文';
+                        inlineLink.addEventListener('click', (event) => event.stopPropagation());
                         body.appendChild(inlineLink);
                     }
-                    entry.appendChild(body);
+                    content.appendChild(body);
                 } else if (item.body) {
                     const body = document.createElement('p');
                     body.textContent = item.body;
@@ -89,21 +113,35 @@
                         inlineLink.target = '_blank';
                         inlineLink.rel = 'noreferrer';
                         inlineLink.textContent = '查看原文';
+                        inlineLink.addEventListener('click', (event) => event.stopPropagation());
                         body.appendChild(inlineLink);
                     }
-                    entry.appendChild(body);
+                    content.appendChild(body);
                 } else if (item.link) {
                     const link = document.createElement('a');
                     link.href = item.link;
                     link.target = '_blank';
                     link.rel = 'noreferrer';
                     link.textContent = '查看原文';
-                    entry.appendChild(link);
+                    link.addEventListener('click', (event) => event.stopPropagation());
+                    content.appendChild(link);
                 }
 
+                layout.appendChild(content);
+                entry.appendChild(layout);
                 section.appendChild(entry);
             }
             root.appendChild(section);
+        }
+    }
+
+    function faviconFor(link) {
+        try {
+            if (!link) return '';
+            const url = new URL(link);
+            return `${url.origin}/favicon.ico`;
+        } catch (err) {
+            return '';
         }
     }
 

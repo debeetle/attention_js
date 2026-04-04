@@ -5,6 +5,7 @@ const WIKIPEDIA_POTD_FEED_URL = 'https://en.wikipedia.org/w/api.php?action=featu
 const WIKIPEDIA_BASE_URL = 'https://en.wikipedia.org';
 const HISTORY_KEY = 'history:items';
 const HISTORY_LIMIT = 100;
+const HISTORY_RETENTION_MS = 15 * 24 * 60 * 60 * 1000;
 const WIKIPEDIA_POTD_SOURCE_KEY = 'wikipedia-potd';
 
 function base64ToUint8Array(b64) {
@@ -389,8 +390,14 @@ async function putStateJson(env, key, value) {
 }
 
 async function appendHistoryItem(env, historyItem) {
-  const history = await getStateJson(env, HISTORY_KEY) || [];
-  const next = [historyItem, ...history.filter(item => item.id !== historyItem.id)].slice(0, HISTORY_LIMIT);
+  const now = Date.now();
+  const history = (await getStateJson(env, HISTORY_KEY) || []).filter((item) => {
+    const createdAt = item && item.createdAt ? Date.parse(item.createdAt) : 0;
+    return createdAt && (now - createdAt) <= HISTORY_RETENTION_MS;
+  });
+  const next = [historyItem, ...history.filter(item => item.id !== historyItem.id)]
+    .sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0))
+    .slice(0, HISTORY_LIMIT);
   await putStateJson(env, HISTORY_KEY, next);
   return next;
 }
@@ -556,11 +563,17 @@ export default {
     }
 
     if (request.method === 'GET' && url.pathname === '/history') {
-      const items = (await getStateJson(env, HISTORY_KEY) || []).map((item) => ({
+      const now = Date.now();
+      const rawItems = (await getStateJson(env, HISTORY_KEY) || []).filter((item) => {
+        const createdAt = item && item.createdAt ? Date.parse(item.createdAt) : 0;
+        return createdAt && (now - createdAt) <= HISTORY_RETENTION_MS;
+      }).sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0));
+      const items = rawItems.map((item) => ({
         ...item,
         body: cleanHistoryBodyText(item.body),
         bodyHtml: item.bodyHtml ? sanitizeSummaryHtml(item.bodyHtml, cleanHistoryBodyText(item.body)) : ''
       }));
+      await putStateJson(env, HISTORY_KEY, rawItems);
       return json({
         ok: true,
         items
