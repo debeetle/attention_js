@@ -270,22 +270,21 @@ function parseLatestFeedItem(feedText) {
   ]), baseUrl || link);
   const summaryHtml = sanitizeSummaryHtml(decodedSummaryHtml, description);
 
-  return { feedTitle, title, link, description, summaryHtml, imageUrl, itemId, publishedAt };
+  return { feedTitle, title, link, description, summaryText: description, summaryHtml, imageUrl, itemId, publishedAt };
 }
 
 function sanitizeSummaryHtml(summaryHtml, summaryText) {
   if (!summaryHtml) return summaryText ? `<p>${escapeHtml(summaryText)}</p>` : '';
-  const firstParagraph = firstMatch(summaryHtml, [
-    /<p\b[^>]*>([\s\S]*?)<\/p>/i
-  ]);
-  if (!firstParagraph) return summaryText ? `<p>${escapeHtml(summaryText)}</p>` : '';
-  const sanitized = removeWikiNoise(firstParagraph)
+  const sanitized = removeWikiNoise(summaryHtml)
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/\son[a-z-]+=(["']).*?\1/gi, '')
     .replace(/\s(?:class|style|lang|dir|title|typeof|data-[^=]+)=["'][^"']*["']/gi, '')
-    .replace(/href=(["'])(\/[^"']*)\1/gi, `href="${
-      WIKIPEDIA_BASE_URL
-    }$2"`)
-    .replace(/href=(["'])(\/\/[^"']*)\1/gi, 'href="https:$2"');
-  return `<p>${sanitized}</p>`;
+    .replace(/href=(["'])(\/[^"']*)\1/gi, `href="${WIKIPEDIA_BASE_URL}$2"`)
+    .replace(/href=(["'])(\/\/[^"']*)\1/gi, 'href="https:$2"')
+    .replace(/src=(["'])(\/\/[^"']*)\1/gi, 'src="https:$2"')
+    .replace(/\s(?:target|download|srcset|sizes|loading|decoding)=["'][^"']*["']/gi, '')
+    .trim();
+  return sanitized || (summaryText ? `<p>${escapeHtml(summaryText)}</p>` : '');
 }
 
 function parseFeedEntries(feedText) {
@@ -359,6 +358,7 @@ function buildHistoryItem(source, item, itemKey, sentAt = new Date().toISOString
     sourceLabel: source.sourceLabel,
     title: item.title,
     body: item.summaryText || item.description || '',
+    bodyHtml: item.summaryHtml || '',
     link: item.link || '',
     imageUrl: item.imageUrl || '',
     publishedAt: item.publishedAt || item.updatedAt || '',
@@ -508,6 +508,7 @@ async function handleWebhookDelivery(env, rawBody, contentType = '') {
     title: body.title,
     description: body.body || '',
     summaryText: body.body || '',
+    summaryHtml: body.bodyHtml || '',
     link: body.link || '',
     imageUrl: body.imageUrl || '',
     itemId: body.itemKey || body.id || body.link || '',
@@ -557,7 +558,8 @@ export default {
     if (request.method === 'GET' && url.pathname === '/history') {
       const items = (await getStateJson(env, HISTORY_KEY) || []).map((item) => ({
         ...item,
-        body: cleanHistoryBodyText(item.body)
+        body: cleanHistoryBodyText(item.body),
+        bodyHtml: item.bodyHtml ? sanitizeSummaryHtml(item.bodyHtml, cleanHistoryBodyText(item.body)) : ''
       }));
       return json({
         ok: true,

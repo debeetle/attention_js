@@ -66,7 +66,20 @@
                     entry.appendChild(image);
                 }
 
-                if (item.body) {
+                if (item.bodyHtml) {
+                    const body = document.createElement('p');
+                    body.innerHTML = item.bodyHtml;
+                    if (item.link) {
+                        body.append(document.createTextNode(' '));
+                        const inlineLink = document.createElement('a');
+                        inlineLink.href = item.link;
+                        inlineLink.target = '_blank';
+                        inlineLink.rel = 'noreferrer';
+                        inlineLink.textContent = '查看原文';
+                        body.appendChild(inlineLink);
+                    }
+                    entry.appendChild(body);
+                } else if (item.body) {
                     const body = document.createElement('p');
                     body.textContent = item.body;
                     if (item.link) {
@@ -100,14 +113,14 @@
             const parts = new Intl.DateTimeFormat('en-GB', {
                 timeZone: 'Asia/Shanghai',
                 year: 'numeric',
-                month: 'numeric',
+                month: 'short',
                 day: 'numeric',
                 hour: 'numeric',
                 minute: '2-digit',
                 hour12: false
             }).formatToParts(date);
             const get = type => parts.find(part => part.type === type)?.value || '';
-            return `${Number(get('hour'))}:${get('minute')} ${Number(get('day'))}.${Number(get('month'))}.${get('year')}`;
+            return `${String(get('month')).toUpperCase()} ${Number(get('day'))}, ${get('year')} AT ${Number(get('hour'))}:${get('minute')}`;
         } catch (err) {
             return value;
         }
