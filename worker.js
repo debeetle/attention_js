@@ -784,7 +784,7 @@ export default {
           await processSourceItem(env, {
             sourceKey: WIKIPEDIA_POTD_SOURCE_KEY,
             sourceType: 'rss',
-            sourceLabel: 'Wikipedia POTD'
+            sourceLabel: 'Wikipedia Picture of Today'
           }, potd);
         }
       }
