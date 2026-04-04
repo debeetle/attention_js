@@ -171,8 +171,37 @@ function decodeXmlEntities(str) {
     .trim();
 }
 
+function removeWikiNoise(str) {
+  return (str || '')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<link[\s\S]*?\/?>/gi, ' ')
+    .replace(/\u007f?['"`]*UNIQ--[\w-]+-QINU['"`]*\u007f?/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function stripTags(str) {
-  return decodeXmlEntities((str || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')).trim();
+  return removeWikiNoise(
+    decodeXmlEntities((str || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' '))
+  ).trim();
+}
+
+function truncateToSentence(text, maxLength = 180) {
+  const normalized = (text || '').replace(/\s+/g, ' ').trim();
+  if (!normalized || normalized.length <= maxLength) return normalized;
+  const slice = normalized.slice(0, maxLength);
+  const lastSentenceEnd = Math.max(
+    slice.lastIndexOf('. '),
+    slice.lastIndexOf('! '),
+    slice.lastIndexOf('? '),
+    slice.lastIndexOf('。'),
+    slice.lastIndexOf('！'),
+    slice.lastIndexOf('？')
+  );
+  if (lastSentenceEnd >= 20) {
+    return slice.slice(0, lastSentenceEnd + 1).trim();
+  }
+  return `${slice.trim()}...`;
 }
 
 function firstMatch(text, patterns) {
@@ -223,9 +252,9 @@ function parseLatestFeedItem(feedText) {
     /<content[^>]*>([\s\S]*?)<\/content>/i,
     /<summary[^>]*>([\s\S]*?)<\/summary>/i
   ]));
-  const description = stripTags(firstMatch(decodedSummaryHtml, [
+  const description = truncateToSentence(stripTags(firstMatch(decodedSummaryHtml, [
     /<p\b[^>]*>([\s\S]*?)<\/p>/i
-  ]) || decodedSummaryHtml).slice(0, 160);
+  ]) || decodedSummaryHtml), 180);
   const imageUrl = toAbsoluteUrl(firstMatch(decodedSummaryHtml, [
     /<img[^>]*src=["']([^"']+)["'][^>]*>/i,
     /<media:content[^>]*url=["']([^"']+)["'][^>]*\/?>/i,
@@ -242,7 +271,7 @@ function sanitizeSummaryHtml(summaryHtml, summaryText) {
     /<p\b[^>]*>([\s\S]*?)<\/p>/i
   ]);
   if (!firstParagraph) return summaryText ? `<p>${escapeHtml(summaryText)}</p>` : '';
-  const sanitized = firstParagraph
+  const sanitized = removeWikiNoise(firstParagraph)
     .replace(/\s(?:class|style|lang|dir|title|typeof|data-[^=]+)=["'][^"']*["']/gi, '')
     .replace(/href=(["'])(\/[^"']*)\1/gi, `href="${
       WIKIPEDIA_BASE_URL
@@ -279,9 +308,9 @@ function parseWikipediaPotdFeed(feedText) {
     const imageUrl = toAbsoluteUrl(firstMatch(decodedSummaryHtml, [
       /<img[^>]*src=["']([^"']+)["'][^>]*>/i
     ]));
-    const summaryText = stripTags(firstMatch(decodedSummaryHtml, [
+    const summaryText = truncateToSentence(stripTags(firstMatch(decodedSummaryHtml, [
       /<p\b[^>]*>([\s\S]*?)<\/p>/i
-    ]) || decodedSummaryHtml).slice(0, 320);
+    ]) || decodedSummaryHtml), 180);
     const summaryHtml = sanitizeSummaryHtml(decodedSummaryHtml, summaryText);
     const date = updated ? updated.slice(0, 10) : '';
 

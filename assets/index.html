@@ -37,23 +37,19 @@
 
         for (const [, group] of grouped) {
             const section = document.createElement('section');
-            const heading = document.createElement('h2');
+            const heading = document.createElement('div');
             heading.textContent = group.sourceLabel;
             section.appendChild(heading);
 
-            const list = document.createElement('ul');
             for (const item of group.items) {
-                const entry = document.createElement('li');
-                const title = document.createElement('a');
-                title.href = item.link || '#';
-                title.target = '_blank';
-                title.rel = 'noreferrer';
+                const entry = document.createElement('article');
+                const title = document.createElement('div');
                 title.textContent = item.title || item.sourceLabel || 'Notification';
                 entry.appendChild(title);
 
                 if (item.publishedAt) {
                     const time = document.createElement('div');
-                    time.textContent = item.publishedAt;
+                    time.textContent = formatChinaTime(item.publishedAt);
                     entry.appendChild(time);
                 }
 
@@ -61,6 +57,9 @@
                     const image = document.createElement('img');
                     image.src = item.imageUrl;
                     image.alt = item.title || '';
+                    image.style.maxWidth = '100%';
+                    image.style.height = 'auto';
+                    image.style.display = 'block';
                     entry.appendChild(image);
                 }
 
@@ -70,10 +69,37 @@
                     entry.appendChild(body);
                 }
 
-                list.appendChild(entry);
+                if (item.link) {
+                    const link = document.createElement('a');
+                    link.href = item.link;
+                    link.target = '_blank';
+                    link.rel = 'noreferrer';
+                    link.textContent = '查看原文';
+                    entry.appendChild(link);
+                }
+
+                section.appendChild(entry);
             }
-            section.appendChild(list);
             root.appendChild(section);
+        }
+    }
+
+    function formatChinaTime(value) {
+        try {
+            const date = new Date(value);
+            const parts = new Intl.DateTimeFormat('en-GB', {
+                timeZone: 'Asia/Shanghai',
+                year: 'numeric',
+                month: 'numeric',
+                day: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+                hour12: false
+            }).formatToParts(date);
+            const get = type => parts.find(part => part.type === type)?.value || '';
+            return `${get('hour')}:${get('minute')} ${get('day')}.${get('month')}.${get('year')}`;
+        } catch (err) {
+            return value;
         }
     }
 
