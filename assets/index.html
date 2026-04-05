@@ -10,9 +10,60 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black">
     <meta name="apple-mobile-web-app-title" content="Attention">
+    <style>
+        #enable-notifications {
+            display: none;
+        }
+        .history-entry {
+            border: 1px solid;
+            margin: 0 0 12px 0;
+            /* padding: 10px; */
+        }
+        .history-entry.is-clickable {
+            cursor: pointer;
+        }
+        .history-layout {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+        }
+        .history-media {
+            flex: 0 0 30%;
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+        }
+        .history-image {
+            display: block;
+            height: auto;
+        }
+        .history-image.is-primary {
+            width: 100%;
+        }
+        .history-image.is-favicon {
+            width: 48px;
+        }
+        .history-meta {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 2px;
+            font-family: sans-serif;
+            /* margin-top: 8px; */
+        }
+        .history-time {
+            white-space: nowrap;
+        }
+        .history-content {
+            flex: 1 1 auto;
+        }
+        .history-body {
+            margin: 0;
+        }
+    </style>
 </head>
 <body>
-    <button id="enable-notifications" style="display:none;">Enable Notifications</button>
+    <button id="enable-notifications">Enable Notifications</button>
     <section id="history"></section>
 
 <script>
@@ -40,44 +91,30 @@
 
             for (const item of group.items) {
                 const entry = document.createElement('article');
-                entry.style.border = '1px solid';
-                entry.style.margin = '0 0 12px 0';
-                entry.style.padding = '10px';
+                entry.className = 'history-entry';
                 if (item.link) {
-                    entry.style.cursor = 'pointer';
+                    entry.classList.add('is-clickable');
                     entry.addEventListener('click', () => {
                         window.location.href = item.link;
                     });
                 }
 
                 const layout = document.createElement('div');
-                layout.style.display = 'flex';
-                layout.style.alignItems = 'flex-start';
-                layout.style.gap = '10px';
+                layout.className = 'history-layout';
 
                 const mediaSource = item.imageUrl || faviconFor(item.link);
                 if (mediaSource) {
                     const mediaWrap = document.createElement('div');
-                    mediaWrap.style.flex = '0 0 30%';
-                    mediaWrap.style.display = 'flex';
-                    mediaWrap.style.flexDirection = 'column';
-                    mediaWrap.style.alignItems = 'stretch';
+                    mediaWrap.className = 'history-media';
 
                     const image = document.createElement('img');
                     image.src = mediaSource;
                     image.alt = item.title || '';
-                    image.style.width = item.imageUrl ? '100%' : '48px';
-                    image.style.height = 'auto';
-                    image.style.display = 'block';
+                    image.className = `history-image ${item.imageUrl ? 'is-primary' : 'is-favicon'}`;
                     mediaWrap.appendChild(image);
 
                     const mediaFooter = document.createElement('div');
-                    mediaFooter.style.display = 'flex';
-                    mediaFooter.style.flexDirection = 'column';
-                    mediaFooter.style.alignItems = 'flex-start';
-                    mediaFooter.style.gap = '2px';
-                    mediaFooter.style.fontFamily = 'sans-serif';
-                    mediaFooter.style.marginTop = '8px';
+                    mediaFooter.className = 'history-meta';
 
                     const footerTitle = document.createElement('div');
                     const shouldRenderTitle = item.sourceKey !== 'wikipedia-potd' && item.title && item.title !== group.sourceLabel;
@@ -89,7 +126,7 @@
                     if (item.publishedAt) {
                         const time = document.createElement('div');
                         time.textContent = formatChinaTime(item.publishedAt);
-                        time.style.whiteSpace = 'nowrap';
+                        time.className = 'history-time';
                         mediaFooter.appendChild(time);
                     }
 
@@ -98,11 +135,11 @@
                 }
 
                 const content = document.createElement('div');
-                content.style.flex = '1 1 auto';
+                content.className = 'history-content';
 
                 if (item.bodyHtml) {
                     const body = document.createElement('p');
-                    body.style.margin = '0';
+                    body.className = 'history-body';
                     body.innerHTML = item.bodyHtml;
                     if (item.link) {
                         body.append(document.createTextNode(' '));
@@ -117,7 +154,7 @@
                     content.appendChild(body);
                 } else if (item.body) {
                     const body = document.createElement('p');
-                    body.style.margin = '0';
+                    body.className = 'history-body';
                     body.textContent = item.body;
                     if (item.link) {
                         body.append(document.createTextNode(' '));
@@ -125,7 +162,7 @@
                         inlineLink.href = item.link;
                         inlineLink.target = '_blank';
                         inlineLink.rel = 'noreferrer';
-                        inlineLink.textContent = '查看原文';
+                        inlineLink.textContent = 'More';
                         inlineLink.addEventListener('click', (event) => event.stopPropagation());
                         body.appendChild(inlineLink);
                     }
@@ -135,7 +172,7 @@
                     link.href = item.link;
                     link.target = '_blank';
                     link.rel = 'noreferrer';
-                    link.textContent = '查看原文';
+                    link.textContent = 'More';
                     link.addEventListener('click', (event) => event.stopPropagation());
                     content.appendChild(link);
                 }
