@@ -17,7 +17,7 @@
         .history-entry {
             border: 1px solid;
             margin: 0 0 12px 0;
-            padding: 10px;
+            /* padding: 10px; */
         }
         .history-entry.is-clickable {
             cursor: pointer;
@@ -25,7 +25,7 @@
         .history-layout {
             display: flex;
             align-items: flex-start;
-            /* gap: 10px; */
+            gap: 10px;
         }
         .history-media {
             flex: 0 0 30%;
@@ -51,9 +51,9 @@
             font-family: sans-serif;
             /* margin-top: 8px; */
         }
-        .history-time {
+        /* .history-time {
             white-space: nowrap;
-        }
+        } */
         .history-content {
             flex: 1 1 auto;
         }
@@ -126,7 +126,7 @@
                     if (item.publishedAt) {
                         const time = document.createElement('div');
                         time.textContent = formatChinaTime(item.publishedAt);
-                        time.className = 'history-time';
+                        // time.className = 'history-time';
                         mediaFooter.appendChild(time);
                     }
 
