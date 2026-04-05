@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -11,295 +11,401 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black">
     <meta name="apple-mobile-web-app-title" content="Attention">
     <style>
+        @font-face {
+            font-family: 'Pixelify Sans';
+            src: url('PixelifySans-VariableFont_wght.ttf');
+            /* src: url('PixelifySans-Regular.woff2') format('woff2'); */
+            font-weight: 400;
+            font-style: normal;
+            font-display: swap;
+        }
+
         #enable-notifications {
             display: none;
         }
-        .history-entry {
-            border: 1px solid;
-            margin: 0 0 12px 0;
-            /* padding: 10px; */
+
+        .notification {
+            padding: 5px;
+            border: 2px solid;
+            border-radius: 10px;
         }
-        .history-entry.is-clickable {
-            cursor: pointer;
+
+        .notification.no-image {
+            display: grid;
+            grid-template-columns: 30% 70%;
+            gap: 1rem;
         }
-        .history-layout {
-            display: flex;
-            align-items: flex-start;
-            gap: 10px;
-        }
-        .history-media {
-            flex: 0 0 30%;
-            display: flex;
-            flex-direction: column;
-            align-items: stretch;
-        }
-        .history-image {
+
+        .picture {
             display: block;
+            max-width: 100%;
+            height: auto;
+            border-radius: 5px;
+        }
+
+        .picture-wrap {
+            position: relative;
+        }
+
+        .picture-title {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            padding: 1rem 0.75rem 0.6rem;
+            background: linear-gradient(to top, rgba(0, 0, 0, 0.82), rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0));
+            color: #fff;
+            font-family: sans-serif;
+            font-weight: bold;
+        }
+
+        .favicon {
+            display: block;
+            width: 100%;
             height: auto;
         }
-        .history-image.is-primary {
-            width: 100%;
-        }
-        .history-image.is-favicon {
-            width: 48px;
-        }
-        .history-meta {
-            display: flex;
-            flex-direction: column;
-            align-items: flex-start;
-            /* gap: 2px; */
+
+        .title,
+        .time {
             font-family: sans-serif;
-            /* margin-top: 8px; */
+            font-weight: bold;
         }
-        /* .history-time {
-            white-space: nowrap;
-        } */
-        .history-content {
-            flex: 1 1 auto;
+
+        .time {
+            font-family: 'Pixelify Sans', sans-serif;
+            font-weight: 400;
         }
-        .history-body {
+
+        .body {
             margin: 0;
         }
+
+        .notification-time-row {
+            text-align: right;
+        }
+
+        :root {
+            color-scheme: light dark;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .notification {
+                border-color: #5a5a5a;
+            }
+        }
+
     </style>
 </head>
 <body>
     <button id="enable-notifications">Enable Notifications</button>
     <section id="history"></section>
 
-<script>
-    let hasSubscribed = false;
-    let PUBLIC_VAPID_KEY = '';
+    <script>
+        let hasSubscribed = false;
+        let PUBLIC_VAPID_KEY = '';
 
-    function renderHistory(data) {
-        const root = document.getElementById('history');
-        root.replaceChildren();
-        if (!data || !data.ok || !Array.isArray(data.items) || data.items.length === 0) return;
+        function renderHistory(payload) {
+            const root = document.getElementById('history');
+            root.replaceChildren();
+            if (!payload || !payload.ok || !Array.isArray(payload.items)) return;
 
-        const grouped = new Map();
-        for (const item of data.items) {
-            if (!grouped.has(item.sourceKey)) {
-                grouped.set(item.sourceKey, {
-                    sourceLabel: item.sourceLabel || item.sourceKey,
-                    items: []
+            for (const item of payload.items) {
+                root.appendChild(buildNotification(item));
+            }
+        }
+
+        function buildNotification(item) {
+            const notification = document.createElement('article');
+            notification.className = `notification${item.imageUrl ? '' : ' no-image'}`;
+
+            if (item.link) {
+                notification.addEventListener('click', () => {
+                    window.location.assign(item.link);
                 });
             }
-            grouped.get(item.sourceKey).items.push(item);
-        }
 
-        for (const [, group] of grouped) {
-            const section = document.createElement('section');
+            if (item.imageUrl) {
+                const pictureWrap = document.createElement('div');
+                pictureWrap.className = 'picture-wrap';
 
-            for (const item of group.items) {
-                const entry = document.createElement('article');
-                entry.className = 'history-entry';
-                if (item.link) {
-                    entry.classList.add('is-clickable');
-                    entry.addEventListener('click', () => {
-                        window.location.href = item.link;
-                    });
-                }
+                const picture = document.createElement('img');
+                picture.className = 'picture';
+                picture.src = item.imageUrl;
+                picture.alt = item.title || item.sourceLabel || '';
+                pictureWrap.appendChild(picture);
 
-                const layout = document.createElement('div');
-                layout.className = 'history-layout';
+                const title = document.createElement('div');
+                title.className = 'picture-title';
+                title.textContent = displayLabel(item);
+                pictureWrap.appendChild(title);
 
-                const mediaSource = item.imageUrl || faviconFor(item.link);
-                if (mediaSource) {
-                    const mediaWrap = document.createElement('div');
-                    mediaWrap.className = 'history-media';
+                notification.appendChild(pictureWrap);
 
-                    const image = document.createElement('img');
-                    image.src = mediaSource;
-                    image.alt = item.title || '';
-                    image.className = `history-image ${item.imageUrl ? 'is-primary' : 'is-favicon'}`;
-                    mediaWrap.appendChild(image);
-
-                    const mediaFooter = document.createElement('div');
-                    mediaFooter.className = 'history-meta';
-
-                    const footerTitle = document.createElement('div');
-                    const shouldRenderTitle = item.sourceKey !== 'wikipedia-potd' && item.title && item.title !== group.sourceLabel;
-                    footerTitle.textContent = item.sourceKey === 'wikipedia-potd'
-                        ? 'Wikipedia Picture of Today'
-                        : (shouldRenderTitle ? (item.title || item.sourceLabel || 'Notification') : group.sourceLabel);
-                    mediaFooter.appendChild(footerTitle);
-
-                    if (item.publishedAt) {
-                        const time = document.createElement('div');
-                        time.textContent = formatChinaTime(item.publishedAt);
-                        // time.className = 'history-time';
-                        mediaFooter.appendChild(time);
-                    }
-
-                    mediaWrap.appendChild(mediaFooter);
-                    layout.appendChild(mediaWrap);
-                }
-
-                const content = document.createElement('div');
-                content.className = 'history-content';
-
-                if (item.bodyHtml) {
-                    const body = document.createElement('p');
-                    body.className = 'history-body';
-                    body.innerHTML = item.bodyHtml;
-                    if (item.link) {
-                        body.append(document.createTextNode(' '));
-                        const inlineLink = document.createElement('a');
-                        inlineLink.href = item.link;
-                        inlineLink.target = '_blank';
-                        inlineLink.rel = 'noreferrer';
-                        inlineLink.textContent = '查看原文';
-                        inlineLink.addEventListener('click', (event) => event.stopPropagation());
-                        body.appendChild(inlineLink);
-                    }
-                    content.appendChild(body);
-                } else if (item.body) {
-                    const body = document.createElement('p');
-                    body.className = 'history-body';
-                    body.textContent = item.body;
-                    if (item.link) {
-                        body.append(document.createTextNode(' '));
-                        const inlineLink = document.createElement('a');
-                        inlineLink.href = item.link;
-                        inlineLink.target = '_blank';
-                        inlineLink.rel = 'noreferrer';
-                        inlineLink.textContent = 'More';
-                        inlineLink.addEventListener('click', (event) => event.stopPropagation());
-                        body.appendChild(inlineLink);
-                    }
-                    content.appendChild(body);
-                } else if (item.link) {
-                    const link = document.createElement('a');
-                    link.href = item.link;
-                    link.target = '_blank';
-                    link.rel = 'noreferrer';
-                    link.textContent = 'More';
-                    link.addEventListener('click', (event) => event.stopPropagation());
-                    content.appendChild(link);
-                }
-
-                layout.appendChild(content);
-                entry.appendChild(layout);
-                section.appendChild(entry);
-            }
-            root.appendChild(section);
-        }
-    }
-
-    function faviconFor(link) {
-        try {
-            if (!link) return '';
-            const url = new URL(link);
-            return `${url.origin}/favicon.ico`;
-        } catch (err) {
-            return '';
-        }
-    }
-
-    function formatChinaTime(value) {
-        try {
-            const date = new Date(value);
-            const parts = new Intl.DateTimeFormat('en-GB', {
-                timeZone: 'Asia/Shanghai',
-                year: 'numeric',
-                month: 'short',
-                day: 'numeric',
-                hour: 'numeric',
-                minute: '2-digit',
-                hour12: false
-            }).formatToParts(date);
-            const get = type => parts.find(part => part.type === type)?.value || '';
-            return `${String(get('month')).toUpperCase()} ${Number(get('day'))}, ${get('year')} AT ${Number(get('hour'))}:${get('minute')}`;
-        } catch (err) {
-            return value;
-        }
-    }
-
-    async function loadHistory() {
-        try {
-            const res = await fetch('/history', { cache: 'no-store' });
-            if (!res.ok) throw new Error('failed');
-            const data = await res.json();
-            renderHistory(data);
-        } catch (err) {
-        }
-    }
-
-    function urlBase64ToUint8Array(base64String) {
-        const padding = '='.repeat((4 - base64String.length % 4) % 4);
-        const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-        const rawData = window.atob(base64);
-        const outputArray = new Uint8Array(rawData.length);
-        for (let i = 0; i < rawData.length; ++i) {
-            outputArray[i] = rawData.charCodeAt(i);
-        }
-        return outputArray;
-    }
-
-    async function subscribe() {
-        try {
-            if (hasSubscribed) return;
-            if (!PUBLIC_VAPID_KEY) return;
-
-            if (Notification.permission === 'default') {
-                const permission = await Notification.requestPermission();
-                if (permission !== 'granted') return;
+                appendBody(notification, item);
+                appendTimeRow(notification, item);
+                return notification;
             }
 
-            if (Notification.permission !== 'granted') return;
+            const left = document.createElement('div');
+            const favicon = document.createElement('img');
+            favicon.className = 'favicon';
+            favicon.src = faviconFor(item.link);
+            favicon.alt = item.title || item.sourceLabel || '';
+            left.appendChild(favicon);
+            appendTitle(left, item);
 
-            const existingSubscription = typeof window.pushManager.getSubscription === 'function'
-                ? await window.pushManager.getSubscription()
-                : null;
+            const right = document.createElement('div');
+            appendBody(right, item);
 
-            const subscription = existingSubscription || await window.pushManager.subscribe({
-                userVisibleOnly: true,
-                applicationServerKey: urlBase64ToUint8Array(PUBLIC_VAPID_KEY)
-            });
-
-            await fetch('/subscribe', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(subscription)
-            });
-
-            hasSubscribed = true;
-            const button = document.getElementById('enable-notifications');
-            if (button) button.style.display = 'none';
-
-        } catch (err) {
+            notification.appendChild(left);
+            notification.appendChild(right);
+            appendTimeRow(notification, item);
+            return notification;
         }
-    }
 
-    window.addEventListener('load', async () => {
-        const button = document.getElementById('enable-notifications');
-        loadHistory();
-        try {
-            const res = await fetch('/config', { cache: 'no-store' });
-            const config = await res.json();
-            PUBLIC_VAPID_KEY = config.vapidPublicKey || '';
-        } catch (err) {
-            return;
+        function appendTitle(parent, item) {
+            const title = document.createElement('div');
+            title.className = 'title';
+            title.textContent = displayLabel(item);
+            parent.appendChild(title);
         }
-        if (Notification.permission === 'default') {
-            if (button) {
-                button.style.display = 'inline-block';
-                button.addEventListener('click', subscribe, { once: true });
+
+        function appendTimeRow(parent, item) {
+            if (!item.publishedAt) return;
+            const row = document.createElement('div');
+            row.className = 'notification-time-row';
+            const time = document.createElement('div');
+            time.className = 'time';
+            time.textContent = formatChinaTime(item.publishedAt);
+            row.appendChild(time);
+            parent.appendChild(row);
+        }
+
+        function appendBody(parent, item) {
+            const body = document.createElement('p');
+            body.className = 'body';
+            if (item.bodyHtml) {
+                body.innerHTML = truncateHtmlToSentences(item.bodyHtml, 3);
+            } else {
+                body.textContent = truncatePlainTextToSentences(item.body || '', 3);
             }
-            return;
+
+            if (item.link) {
+                body.append(document.createTextNode(' '));
+                body.appendChild(buildLink(item.link));
+            }
+
+            parent.appendChild(body);
         }
 
-        if (Notification.permission === 'granted') {
-            if (typeof window.pushManager.getSubscription === 'function') {
-                const existingSubscription = await window.pushManager.getSubscription();
-                if (existingSubscription) {
-                    hasSubscribed = true;
+        function buildLink(href) {
+            const link = document.createElement('a');
+            link.href = href;
+            link.target = '_blank';
+            link.rel = 'noreferrer';
+            link.textContent = 'More';
+            link.addEventListener('click', (event) => event.stopPropagation());
+            return link;
+        }
+
+        function truncatePlainTextToSentences(text, maxSentences) {
+            const normalized = (text || '').replace(/\s+/g, ' ').trim();
+            if (!normalized) return '';
+            const endIndex = findSentenceCutIndex(normalized, maxSentences);
+            if (endIndex === -1) return normalized;
+            return normalized.slice(0, endIndex).trim();
+        }
+
+        function truncateHtmlToSentences(html, maxSentences) {
+            const template = document.createElement('template');
+            template.innerHTML = html || '';
+            let sentenceCount = 0;
+            let truncated = false;
+
+            function trimNode(node) {
+                if (truncated) {
+                    node.remove();
                     return;
                 }
-            }
-            subscribe();
-        }
-    });
-</script>
-</body>
 
+                if (node.nodeType === Node.TEXT_NODE) {
+                    const text = node.textContent || '';
+                    for (let i = 0; i < text.length; i++) {
+                        if (!isSentenceTerminator(text, i)) continue;
+                        sentenceCount += 1;
+                        if (sentenceCount >= maxSentences) {
+                            node.textContent = text.slice(0, i + 1);
+                            truncated = true;
+                            return;
+                        }
+                    }
+                    return;
+                }
+
+                const children = Array.from(node.childNodes);
+                for (const child of children) {
+                    trimNode(child);
+                    if (truncated) {
+                        let sibling = child.nextSibling;
+                        while (sibling) {
+                            const next = sibling.nextSibling;
+                            sibling.remove();
+                            sibling = next;
+                        }
+                        return;
+                    }
+                }
+            }
+
+            trimNode(template.content);
+
+            return template.innerHTML.trim();
+        }
+
+        function findSentenceCutIndex(text, maxSentences) {
+            let sentenceCount = 0;
+            for (let i = 0; i < text.length; i++) {
+                if (!isSentenceTerminator(text, i)) continue;
+                sentenceCount += 1;
+                if (sentenceCount >= maxSentences) {
+                    return i + 1;
+                }
+            }
+            return -1;
+        }
+
+        function isSentenceTerminator(text, index) {
+            const ch = text[index];
+            if (!/[.!?。！？]/.test(ch)) return false;
+
+            const prev = index > 0 ? text[index - 1] : '';
+            const next = index + 1 < text.length ? text[index + 1] : '';
+
+            if (ch === '.' && /\d/.test(prev) && /\d/.test(next)) {
+                return false;
+            }
+
+            return true;
+        }
+
+        function displayLabel(item) {
+            if (item.sourceKey === 'wikipedia-potd') return 'Wikipedia Picture of Today';
+            return item.sourceLabel || item.title || 'Notification';
+        }
+
+        function faviconFor(link) {
+            try {
+                if (!link) return '/icon.png';
+                const url = new URL(link);
+                return `${url.origin}/favicon.ico`;
+            } catch {
+                return '/icon.png';
+            }
+        }
+
+        function formatChinaTime(value) {
+            try {
+                const date = new Date(value);
+                const parts = new Intl.DateTimeFormat('en-GB', {
+                    timeZone: 'Asia/Shanghai',
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: 'numeric',
+                    minute: '2-digit',
+                    hour12: false
+                }).formatToParts(date);
+                const get = (type) => parts.find((part) => part.type === type)?.value || '';
+                return `${String(get('month')).toUpperCase()} ${Number(get('day'))}, ${get('year')} AT ${Number(get('hour'))}:${get('minute')}`;
+            } catch {
+                return value;
+            }
+        }
+
+        async function loadHistory() {
+            try {
+                const res = await fetch('/history', { cache: 'no-store' });
+                if (!res.ok) return;
+                renderHistory(await res.json());
+            } catch {
+            }
+        }
+
+        function urlBase64ToUint8Array(base64String) {
+            const padding = '='.repeat((4 - base64String.length % 4) % 4);
+            const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+            const rawData = window.atob(base64);
+            const outputArray = new Uint8Array(rawData.length);
+            for (let i = 0; i < rawData.length; ++i) {
+                outputArray[i] = rawData.charCodeAt(i);
+            }
+            return outputArray;
+        }
+
+        async function subscribe() {
+            try {
+                if (hasSubscribed || !PUBLIC_VAPID_KEY) return;
+
+                if (Notification.permission === 'default') {
+                    const permission = await Notification.requestPermission();
+                    if (permission !== 'granted') return;
+                }
+
+                if (Notification.permission !== 'granted') return;
+
+                const existingSubscription = typeof window.pushManager.getSubscription === 'function'
+                    ? await window.pushManager.getSubscription()
+                    : null;
+
+                const subscription = existingSubscription || await window.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: urlBase64ToUint8Array(PUBLIC_VAPID_KEY)
+                });
+
+                await fetch('/subscribe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(subscription)
+                });
+
+                hasSubscribed = true;
+                const button = document.getElementById('enable-notifications');
+                if (button) button.style.display = 'none';
+            } catch {
+            }
+        }
+
+        window.addEventListener('load', async () => {
+            const button = document.getElementById('enable-notifications');
+            loadHistory();
+
+            try {
+                const res = await fetch('/config', { cache: 'no-store' });
+                const config = await res.json();
+                PUBLIC_VAPID_KEY = config.vapidPublicKey || '';
+            } catch {
+                return;
+            }
+
+            if (Notification.permission === 'default') {
+                if (button) {
+                    button.style.display = 'inline-block';
+                    button.addEventListener('click', subscribe, { once: true });
+                }
+                return;
+            }
+
+            if (Notification.permission === 'granted') {
+                if (typeof window.pushManager.getSubscription === 'function') {
+                    const existingSubscription = await window.pushManager.getSubscription();
+                    if (existingSubscription) {
+                        hasSubscribed = true;
+                        return;
+                    }
+                }
+                subscribe();
+            }
+        });
+    </script>
+</body>
 </html>
