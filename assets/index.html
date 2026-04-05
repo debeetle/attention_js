@@ -73,9 +73,9 @@
 
                     const mediaFooter = document.createElement('div');
                     mediaFooter.style.display = 'flex';
-                    mediaFooter.style.justifyContent = 'space-between';
-                    mediaFooter.style.alignItems = 'baseline';
-                    mediaFooter.style.gap = '8px';
+                    mediaFooter.style.flexDirection = 'column';
+                    mediaFooter.style.alignItems = 'flex-start';
+                    mediaFooter.style.gap = '2px';
                     mediaFooter.style.fontFamily = 'sans-serif';
                     mediaFooter.style.marginTop = '8px';
 
@@ -89,8 +89,6 @@
                     if (item.publishedAt) {
                         const time = document.createElement('div');
                         time.textContent = formatChinaTime(item.publishedAt);
-                        time.style.marginLeft = 'auto';
-                        time.style.textAlign = 'right';
                         time.style.whiteSpace = 'nowrap';
                         mediaFooter.appendChild(time);
                     }
