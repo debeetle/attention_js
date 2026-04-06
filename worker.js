@@ -2,10 +2,21 @@ import { setVapidDetails, sendNotification } from './pwanotify.js';
 
 const SHANGHAI_TIME_ZONE = 'Asia/Shanghai';
 const WIKIPEDIA_POTD_FEED_URL = 'https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=potd&feedformat=atom';
+const WIKIPEDIA_ONTHISDAY_FEED_URL = 'https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=onthisday&feedformat=atom';
+const WIKIPEDIA_POTD_SOURCE_LABEL = 'Wikipedia Picture of Today';
 const HISTORY_KEY = 'history:items';
 const HISTORY_LIMIT = 100;
 const HISTORY_RETENTION_MS = 15 * 24 * 60 * 60 * 1000;
-const WIKIPEDIA_POTD_SOURCE_KEY = 'wikipedia-potd';
+const SCHEDULED_RSS_FEEDS = [
+  {
+    feedUrl: WIKIPEDIA_POTD_FEED_URL,
+    sourceLabel: WIKIPEDIA_POTD_SOURCE_LABEL
+  },
+  {
+    feedUrl: WIKIPEDIA_ONTHISDAY_FEED_URL,
+    imageWidth: 250
+  }
+];
 
 function base64ToUint8Array(b64) {
   const bin = atob(b64);
@@ -336,6 +347,44 @@ function deriveItemKey(item) {
   return item.itemId || item.link || `${item.title}::${item.publishedAt || item.updatedAt || ''}`;
 }
 
+function getRssSourceKey(feedUrl) {
+  return `rss:${feedUrl}`;
+}
+
+function getRssSourceLabel(feedUrl, fallbackLabel = '') {
+  return feedUrl === WIKIPEDIA_POTD_FEED_URL ? WIKIPEDIA_POTD_SOURCE_LABEL : (fallbackLabel || feedUrl);
+}
+
+function resizeWikipediaThumb(url, width) {
+  if (!url || !width) return url || '';
+  return url.replace(/\/thumb\/([^/]+\/[^/]+)\/\d+px-([^/?#]+)([?#].*)?$/i, `/thumb/$1/${width}px-$2$3`);
+}
+
+function normalizeScheduledFeedItem(feedConfig, item) {
+  if (!item) return item;
+  if (!feedConfig?.imageWidth) return item;
+  return {
+    ...item,
+    imageUrl: resizeWikipediaThumb(item.imageUrl, feedConfig.imageWidth)
+  };
+}
+
+function normalizeHistorySource(item) {
+  if (!item) return item;
+  const wikipediaSourceKey = getRssSourceKey(WIKIPEDIA_POTD_FEED_URL);
+  if (item.sourceKey === 'wikipedia-potd') {
+    return { ...item, sourceKey: wikipediaSourceKey, sourceLabel: WIKIPEDIA_POTD_SOURCE_LABEL };
+  }
+  if (item.sourceKey === wikipediaSourceKey) {
+    return { ...item, sourceLabel: WIKIPEDIA_POTD_SOURCE_LABEL };
+  }
+  return item;
+}
+
+function getScheduledFeedConfig(feedUrl) {
+  return SCHEDULED_RSS_FEEDS.find((feed) => feed.feedUrl === feedUrl) || null;
+}
+
 async function getStateJson(env, key) {
   const raw = await env.SUBS.get(key);
   if (!raw) return null;
@@ -359,29 +408,31 @@ async function appendHistoryItem(env, historyItem) {
   return next;
 }
 
-async function refreshWikipediaPotdState(env) {
-  const preview = await fetchFeedPreview(WIKIPEDIA_POTD_FEED_URL);
+async function refreshScheduledRssFeedState(env, feedConfig) {
+  const { feedUrl } = feedConfig;
+  const preview = await fetchFeedPreview(feedUrl);
   if (preview.status < 200 || preview.status >= 300) {
-    throw new Error(`POTD feed fetch failed: ${preview.status}`);
+    throw new Error(`Scheduled feed fetch failed: ${preview.status}`);
   }
 
-  const potd = parseLatestFeedItem(preview.text);
-  if (!potd) throw new Error('Unable to parse Wikipedia POTD feed');
-  potd.date = (potd.publishedAt || '').slice(0, 10);
+  const item = normalizeScheduledFeedItem(feedConfig, parseLatestFeedItem(preview.text));
+  if (!item) throw new Error('Unable to parse scheduled feed');
+  item.date = (item.publishedAt || '').slice(0, 10);
 
-  const current = await getStateJson(env, getSourceCurrentKey(WIKIPEDIA_POTD_SOURCE_KEY));
+  const sourceKey = getRssSourceKey(feedUrl);
+  const current = await getStateJson(env, getSourceCurrentKey(sourceKey));
   const changed = !current ||
-    current.date !== potd.date ||
-    current.title !== potd.title ||
-    current.link !== potd.link ||
-    current.summaryText !== potd.summaryText ||
-    current.imageUrl !== potd.imageUrl;
+    current.date !== item.date ||
+    current.title !== item.title ||
+    current.link !== item.link ||
+    current.summaryText !== item.summaryText ||
+    current.imageUrl !== item.imageUrl;
 
   if (changed) {
-    await putStateJson(env, getSourceCurrentKey(WIKIPEDIA_POTD_SOURCE_KEY), potd);
+    await putStateJson(env, getSourceCurrentKey(sourceKey), item);
   }
 
-  return { potd, changed };
+  return { item, changed };
 }
 
 async function processSourceItem(env, source, item, options = {}) {
@@ -525,7 +576,8 @@ export default {
       const rawItems = (await getStateJson(env, HISTORY_KEY) || []).filter((item) => {
         const createdAt = item && item.createdAt ? Date.parse(item.createdAt) : 0;
         return createdAt && (now - createdAt) <= HISTORY_RETENTION_MS;
-      }).sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0));
+      }).map(normalizeHistorySource)
+        .sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0));
       const items = rawItems.map((item) => ({
         ...item,
         summaryText: cleanHistoryBodyText(item.summaryText),
@@ -717,15 +769,17 @@ export default {
 
       const item = parseLatestFeedItem(preview.text);
       if (!item || !item.title) return new Response('Unable to parse latest feed item', { status: 422 });
+      const scheduledFeedConfig = getScheduledFeedConfig(feedUrl);
+      const normalizedItem = normalizeScheduledFeedItem(scheduledFeedConfig, item);
       const result = await processSourceItem(env, {
-        sourceKey: `rss:${feedUrl}`,
+        sourceKey: getRssSourceKey(feedUrl),
         sourceType: 'rss',
-        sourceLabel: item.feedTitle || feedUrl
-      }, item, { cacheCurrent: false });
+        sourceLabel: getRssSourceLabel(feedUrl, normalizedItem.feedTitle || feedUrl)
+      }, normalizedItem, { cacheCurrent: false });
       return json({
         ok: !result.skipped && result.failed === 0,
         feedUrl,
-        item,
+        item: normalizedItem,
         ...result
       }, result.skipped ? 200 : (result.failed === 0 ? 200 : 207));
     }
@@ -737,15 +791,20 @@ export default {
     const work = (async () => {
       initializeVapid(env);
       if (controller.cron === '10 0 * * *') {
-        await refreshWikipediaPotdState(env);
+        for (const feedConfig of SCHEDULED_RSS_FEEDS) {
+          await refreshScheduledRssFeedState(env, feedConfig);
+        }
       } else if (controller.cron === '30 0 * * *') {
-        const potd = await getStateJson(env, getSourceCurrentKey(WIKIPEDIA_POTD_SOURCE_KEY));
-        if (potd) {
-          await processSourceItem(env, {
-            sourceKey: WIKIPEDIA_POTD_SOURCE_KEY,
-            sourceType: 'rss',
-            sourceLabel: 'Wikipedia POTD'
-          }, potd);
+        for (const feedConfig of SCHEDULED_RSS_FEEDS) {
+          const sourceKey = getRssSourceKey(feedConfig.feedUrl);
+          const item = await getStateJson(env, getSourceCurrentKey(sourceKey));
+          if (item) {
+            await processSourceItem(env, {
+              sourceKey,
+              sourceType: 'rss',
+              sourceLabel: getRssSourceLabel(feedConfig.feedUrl, item.feedTitle || feedConfig.feedUrl)
+            }, item);
+          }
         }
       }
     })();
