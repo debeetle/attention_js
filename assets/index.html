@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -12,12 +13,11 @@
     <meta name="apple-mobile-web-app-title" content="Attention">
     <style>
         @font-face {
-            font-family: 'Pixelify Sans';
-            src: url('PixelifySans-VariableFont_wght.ttf');
-            /* src: url('PixelifySans-Regular.woff2') format('woff2'); */
-            font-weight: 400;
-            font-style: normal;
-            font-display: swap;
+            font-family: 'Source Code Pro';
+            src: url('SourceCodePro-Regular.ttf.woff2') format('woff2');
+            /* font-weight: 400; */
+            /* font-style: normal;
+            font-display: swap; */
         }
 
         #enable-notifications {
@@ -25,8 +25,9 @@
         }
 
         .notification {
+            margin: 0.5rem 0;
             padding: 5px;
-            border: 2px solid;
+            border: 2px solid #5a5a5a;
             border-radius: 10px;
         }
 
@@ -40,22 +41,35 @@
             display: block;
             max-width: 100%;
             height: auto;
-            border-radius: 5px;
+            width: 100%;
         }
 
         .picture-wrap {
             position: relative;
+            overflow: hidden;
+            border-radius: 5px;
         }
 
-        .picture-title {
+        .picture-overlay {
             position: absolute;
             left: 0;
             right: 0;
             bottom: 0;
-            padding: 1rem 0.75rem 0.6rem;
+            padding: 0.5rem;
             background: linear-gradient(to top, rgba(0, 0, 0, 0.82), rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0));
-            color: #fff;
+            color: rgba(255, 255, 255, 0.78);
+        }
+
+        .picture-title {
             font-family: sans-serif;
+            font-weight: bold;
+            color: rgba(255, 255, 255, 0.72);
+        }
+
+        .picture-time {
+            color: rgba(255, 255, 255, 0.72);
+            font-family: sans-serif;
+            font-size: 0.8rem;
             font-weight: bold;
         }
 
@@ -65,18 +79,22 @@
             height: auto;
         }
 
-        .title,
-        .time {
+        .title {
             font-family: sans-serif;
             font-weight: bold;
         }
 
         .time {
-            font-family: 'Pixelify Sans', sans-serif;
-            font-weight: 400;
+            font-family: sans-serif;
+            font-size: 0.8rem;
+            font-weight: bold;
         }
 
-        .body {
+        /* .body {
+            margin: 0;
+        } */
+
+        p {
             margin: 0;
         }
 
@@ -93,9 +111,9 @@
                 border-color: #5a5a5a;
             }
         }
-
     </style>
 </head>
+
 <body>
     <button id="enable-notifications">Enable Notifications</button>
     <section id="history"></section>
@@ -134,15 +152,26 @@
                 picture.alt = item.title || item.sourceLabel || '';
                 pictureWrap.appendChild(picture);
 
+                const overlay = document.createElement('div');
+                overlay.className = 'picture-overlay';
+
                 const title = document.createElement('div');
                 title.className = 'picture-title';
                 title.textContent = displayLabel(item);
-                pictureWrap.appendChild(title);
+                overlay.appendChild(title);
+
+                if (item.publishedAt) {
+                    const time = document.createElement('div');
+                    time.className = 'time picture-time';
+                    time.textContent = formatChinaTime(item.publishedAt);
+                    overlay.appendChild(time);
+                }
+
+                pictureWrap.appendChild(overlay);
 
                 notification.appendChild(pictureWrap);
 
                 appendBody(notification, item);
-                appendTimeRow(notification, item);
                 return notification;
             }
 
@@ -182,38 +211,31 @@
         }
 
         function appendBody(parent, item) {
-            const body = document.createElement('p');
+            const body = document.createElement('div');
             body.className = 'body';
-            if (item.bodyHtml) {
-                body.innerHTML = truncateHtmlToSentences(item.bodyHtml, 3);
-            } else {
-                body.textContent = truncatePlainTextToSentences(item.body || '', 3);
-            }
-
-            if (item.link) {
-                body.append(document.createTextNode(' '));
-                body.appendChild(buildLink(item.link));
+            if (item.summaryHtml) {
+                body.innerHTML = removeEmbeddedImages(truncateHtmlToSentences(item.summaryHtml, 3));
             }
 
             parent.appendChild(body);
         }
 
-        function buildLink(href) {
-            const link = document.createElement('a');
-            link.href = href;
-            link.target = '_blank';
-            link.rel = 'noreferrer';
-            link.textContent = 'More';
-            link.addEventListener('click', (event) => event.stopPropagation());
-            return link;
-        }
+        function removeEmbeddedImages(html) {
+            if (!html) return '';
+            const template = document.createElement('template');
+            template.innerHTML = html;
 
-        function truncatePlainTextToSentences(text, maxSentences) {
-            const normalized = (text || '').replace(/\s+/g, ' ').trim();
-            if (!normalized) return '';
-            const endIndex = findSentenceCutIndex(normalized, maxSentences);
-            if (endIndex === -1) return normalized;
-            return normalized.slice(0, endIndex).trim();
+            for (const image of Array.from(template.content.querySelectorAll('img'))) {
+                image.remove();
+            }
+
+            for (const empty of Array.from(template.content.querySelectorAll('table, tbody, tr, td, div, span, p'))) {
+                if (empty.children.length === 0 && !empty.textContent.trim()) {
+                    empty.remove();
+                }
+            }
+
+            return template.innerHTML.trim();
         }
 
         function truncateHtmlToSentences(html, maxSentences) {
@@ -258,20 +280,7 @@
             }
 
             trimNode(template.content);
-
             return template.innerHTML.trim();
-        }
-
-        function findSentenceCutIndex(text, maxSentences) {
-            let sentenceCount = 0;
-            for (let i = 0; i < text.length; i++) {
-                if (!isSentenceTerminator(text, i)) continue;
-                sentenceCount += 1;
-                if (sentenceCount >= maxSentences) {
-                    return i + 1;
-                }
-            }
-            return -1;
         }
 
         function isSentenceTerminator(text, index) {
@@ -408,4 +417,5 @@
         });
     </script>
 </body>
+
 </html>

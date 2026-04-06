@@ -2,7 +2,6 @@ import { setVapidDetails, sendNotification } from './pwanotify.js';
 
 const SHANGHAI_TIME_ZONE = 'Asia/Shanghai';
 const WIKIPEDIA_POTD_FEED_URL = 'https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=potd&feedformat=atom';
-const WIKIPEDIA_BASE_URL = 'https://en.wikipedia.org';
 const HISTORY_KEY = 'history:items';
 const HISTORY_LIMIT = 100;
 const HISTORY_RETENTION_MS = 15 * 24 * 60 * 60 * 1000;
@@ -119,15 +118,6 @@ async function fetchFeedPreview(feedUrl) {
   return { status: res.status, contentType: res.headers.get('content-type') || '', text };
 }
 
-function shanghaiDateString(date = new Date()) {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: SHANGHAI_TIME_ZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  }).format(date);
-}
-
 function escapeHtml(str) {
   return (str || '')
     .replace(/&/g, '&amp;')
@@ -141,7 +131,7 @@ function toAbsoluteUrl(url, baseUrl = '') {
   if (!url) return '';
   if (url.startsWith('//')) return `https:${url}`;
   try {
-    return new URL(url, baseUrl || WIKIPEDIA_BASE_URL).toString();
+    return baseUrl ? new URL(url, baseUrl).toString() : new URL(url).toString();
   } catch {
     return url;
   }
@@ -172,7 +162,7 @@ function decodeXmlEntities(str) {
     .trim();
 }
 
-function removeWikiNoise(str) {
+function normalizeMarkupNoise(str) {
   return (str || '')
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
     .replace(/<link[\s\S]*?\/?>/gi, ' ')
@@ -183,7 +173,7 @@ function removeWikiNoise(str) {
 }
 
 function stripTags(str) {
-  return removeWikiNoise(
+  return normalizeMarkupNoise(
     decodeXmlEntities((str || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' '))
   ).trim();
 }
@@ -207,7 +197,7 @@ function truncateToSentence(text, maxLength = 180) {
 }
 
 function cleanHistoryBodyText(text) {
-  const cleaned = removeWikiNoise((text || '').replace(/\s+/g, ' ')).trim();
+  const cleaned = normalizeMarkupNoise((text || '').replace(/\s+/g, ' ')).trim();
   if (!cleaned) return '';
   if (/[.!?。！？…]$/.test(cleaned)) return cleaned;
   return `${cleaned}...`;
@@ -221,21 +211,8 @@ function firstMatch(text, patterns) {
   return '';
 }
 
-function parseLatestFeedItem(feedText) {
-  const itemBlock = firstMatch(feedText, [
-    /<item\b[^>]*>([\s\S]*?)<\/item>/i,
-    /<entry\b[^>]*>([\s\S]*?)<\/entry>/i
-  ]);
-  if (!itemBlock) return null;
-
-  const feedTitle = stripTags(firstMatch(feedText, [
-    /<channel\b[^>]*>[\s\S]*?<title>([\s\S]*?)<\/title>/i,
-    /<feed\b[^>]*>[\s\S]*?<title[^>]*>([\s\S]*?)<\/title>/i
-  ]));
-  const baseUrl = decodeXmlEntities(firstMatch(feedText, [
-    /<link[^>]*rel=["']alternate["'][^>]*href=["']([^"']+)["'][^>]*\/?>/i,
-    /<link[^>]*href=["']([^"']+)["'][^>]*\/?>/i
-  ]));
+function parseFeedItemBlock(itemBlock, feedMeta) {
+  const { feedTitle = '', baseUrl = '' } = feedMeta || {};
   const title = stripTags(firstMatch(itemBlock, [
     /<title[^>]*>([\s\S]*?)<\/title>/i
   ]));
@@ -269,85 +246,65 @@ function parseLatestFeedItem(feedText) {
     /<media:content[^>]*url=["']([^"']+)["'][^>]*\/?>/i,
     /<media:thumbnail[^>]*url=["']([^"']+)["'][^>]*\/?>/i
   ]), baseUrl || link);
-  const summaryHtml = sanitizeSummaryHtml(decodedSummaryHtml, description);
+  const summaryHtml = sanitizeSummaryHtml(decodedSummaryHtml, description, baseUrl || link);
 
   return { feedTitle, title, link, description, summaryText: description, summaryHtml, imageUrl, itemId, publishedAt };
 }
 
-function sanitizeSummaryHtml(summaryHtml, summaryText) {
+function parseLatestFeedItem(feedText) {
+  const feedMeta = {
+    feedTitle: stripTags(firstMatch(feedText, [
+      /<channel\b[^>]*>[\s\S]*?<title>([\s\S]*?)<\/title>/i,
+      /<feed\b[^>]*>[\s\S]*?<title[^>]*>([\s\S]*?)<\/title>/i
+    ])),
+    baseUrl: decodeXmlEntities(firstMatch(feedText, [
+      /<link[^>]*rel=["']alternate["'][^>]*href=["']([^"']+)["'][^>]*\/?>/i,
+      /<link[^>]*href=["']([^"']+)["'][^>]*\/?>/i
+    ]))
+  };
+  const parsedItems = [
+    ...Array.from(feedText.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)).map((match) => match[1]),
+    ...Array.from(feedText.matchAll(/<entry\b[^>]*>([\s\S]*?)<\/entry>/gi)).map((match) => match[1])
+  ]
+    .map((itemBlock) => parseFeedItemBlock(itemBlock, feedMeta))
+    .filter((item) => item && item.title);
+
+  if (parsedItems.length === 0) return null;
+
+  parsedItems.sort((a, b) => {
+    const aTime = Date.parse(a.publishedAt || 0);
+    const bTime = Date.parse(b.publishedAt || 0);
+    return aTime - bTime;
+  });
+  return parsedItems.at(-1);
+}
+
+function sanitizeSummaryHtml(summaryHtml, summaryText, baseUrl = '') {
   if (!summaryHtml) return summaryText ? `<p>${escapeHtml(summaryText)}</p>` : '';
-  const sanitized = removeWikiNoise(summaryHtml)
+  const sanitized = normalizeMarkupNoise(summaryHtml)
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
     .replace(/\son[a-z-]+=(["']).*?\1/gi, '')
     .replace(/\s(?:class|style|lang|dir|title|typeof|data-[^=]+)=["'][^"']*["']/gi, '')
-    .replace(/href=(["'])(\/[^"']*)\1/gi, `href="${WIKIPEDIA_BASE_URL}$2"`)
+    .replace(/href=(["'])(\/[^"']*)\1/gi, (_, quote, path) => `href=${quote}${toAbsoluteUrl(path, baseUrl)}${quote}`)
     .replace(/href=(["'])(\/\/[^"']*)\1/gi, 'href="https:$2"')
     .replace(/src=(["'])(\/\/[^"']*)\1/gi, 'src="https:$2"')
+    .replace(/src=(["'])(\/[^"']*)\1/gi, (_, quote, path) => `src=${quote}${toAbsoluteUrl(path, baseUrl)}${quote}`)
     .replace(/\s(?:target|download|srcset|sizes|loading|decoding)=["'][^"']*["']/gi, '')
     .trim();
   return sanitized || (summaryText ? `<p>${escapeHtml(summaryText)}</p>` : '');
 }
 
-function parseFeedEntries(feedText) {
-  return Array.from(feedText.matchAll(/<entry\b[^>]*>([\s\S]*?)<\/entry>/gi)).map(match => match[1]);
-}
-
-function parseWikipediaPotdFeed(feedText) {
-  const entries = parseFeedEntries(feedText);
-  if (entries.length === 0) return null;
-
-  const parsedEntries = entries.map((entryBlock) => {
-    const title = stripTags(firstMatch(entryBlock, [
-      /<title[^>]*>([\s\S]*?)<\/title>/i
-    ]));
-    const link = toAbsoluteUrl(decodeXmlEntities(firstMatch(entryBlock, [
-      /<link[^>]*rel=["']alternate["'][^>]*href=["']([^"']+)["'][^>]*\/?>/i,
-      /<link[^>]*href=["']([^"']+)["'][^>]*\/?>/i,
-      /<id[^>]*>(https?:[^<]+)<\/id>/i
-    ])));
-    const updated = firstMatch(entryBlock, [
-      /<updated[^>]*>([\s\S]*?)<\/updated>/i,
-      /<published[^>]*>([\s\S]*?)<\/published>/i
-    ]);
-    const decodedSummaryHtml = decodeXmlEntities(firstMatch(entryBlock, [
-      /<summary[^>]*>([\s\S]*?)<\/summary>/i,
-      /<content[^>]*>([\s\S]*?)<\/content>/i
-    ]));
-    const imageUrl = toAbsoluteUrl(firstMatch(decodedSummaryHtml, [
-      /<img[^>]*src=["']([^"']+)["'][^>]*>/i
-    ]));
-    const summaryText = truncateToSentence(stripTags(firstMatch(decodedSummaryHtml, [
-      /<p\b[^>]*>([\s\S]*?)<\/p>/i
-    ]) || decodedSummaryHtml), 180);
-    const summaryHtml = sanitizeSummaryHtml(decodedSummaryHtml, summaryText);
-    const date = updated ? updated.slice(0, 10) : '';
-
-    return {
-      date,
-      title,
-      link,
-      summaryText,
-      summaryHtml,
-      imageUrl,
-      updatedAt: updated
-    };
-  }).filter(item => item.title && item.updatedAt);
-
-  if (parsedEntries.length === 0) return null;
-  parsedEntries.sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
-  return parsedEntries.at(-1);
-}
-
 function buildNotificationPayload(item) {
+  const notification = {
+    title: item.title,
+    body: item.summaryText || item.description || item.feedTitle || 'New item',
+    silent: false,
+    app_badge: '1'
+  };
+  if (item.link) notification.navigate = item.link;
   return {
     web_push: 8030,
-    notification: {
-      title: item.title,
-      body: item.summaryText || item.description || item.feedTitle || 'New item',
-      navigate: item.link || WIKIPEDIA_BASE_URL,
-      silent: false,
-      app_badge: '1'
-    }
+    notification
   };
 }
 
@@ -358,8 +315,8 @@ function buildHistoryItem(source, item, itemKey, sentAt = new Date().toISOString
     sourceType: source.sourceType,
     sourceLabel: source.sourceLabel,
     title: item.title,
-    body: item.summaryText || item.description || '',
-    bodyHtml: item.summaryHtml || '',
+    summaryText: item.summaryText || item.description || '',
+    summaryHtml: item.summaryHtml || '',
     link: item.link || '',
     imageUrl: item.imageUrl || '',
     publishedAt: item.publishedAt || item.updatedAt || '',
@@ -408,8 +365,9 @@ async function refreshWikipediaPotdState(env) {
     throw new Error(`POTD feed fetch failed: ${preview.status}`);
   }
 
-  const potd = parseWikipediaPotdFeed(preview.text);
+  const potd = parseLatestFeedItem(preview.text);
   if (!potd) throw new Error('Unable to parse Wikipedia POTD feed');
+  potd.date = (potd.publishedAt || '').slice(0, 10);
 
   const current = await getStateJson(env, getSourceCurrentKey(WIKIPEDIA_POTD_SOURCE_KEY));
   const changed = !current ||
@@ -570,8 +528,10 @@ export default {
       }).sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0));
       const items = rawItems.map((item) => ({
         ...item,
-        body: cleanHistoryBodyText(item.body),
-        bodyHtml: item.bodyHtml ? sanitizeSummaryHtml(item.bodyHtml, cleanHistoryBodyText(item.body)) : ''
+        summaryText: cleanHistoryBodyText(item.summaryText),
+        summaryHtml: item.summaryHtml
+          ? sanitizeSummaryHtml(item.summaryHtml, cleanHistoryBodyText(item.summaryText))
+          : ''
       }));
       await putStateJson(env, HISTORY_KEY, rawItems);
       return json({
@@ -776,7 +736,7 @@ export default {
   async scheduled(controller, env, ctx) {
     const work = (async () => {
       initializeVapid(env);
-      if (controller.cron === '5 0 * * *') {
+      if (controller.cron === '10 0 * * *') {
         await refreshWikipediaPotdState(env);
       } else if (controller.cron === '30 0 * * *') {
         const potd = await getStateJson(env, getSourceCurrentKey(WIKIPEDIA_POTD_SOURCE_KEY));
