@@ -1,18 +1,21 @@
 import { setVapidDetails, sendNotification } from './pwanotify.js';
+import { buildQWeatherAuthorizationHeader } from './qweather-jwt.js';
 
 const SHANGHAI_TIME_ZONE = 'Asia/Shanghai';
 const HISTORY_KEY = 'history:items';
 const RSS_SOURCES_KEY = 'sources:rss';
 const HISTORY_LIMIT = 50;
 const HISTORY_RETENTION_MS = 3 * 24 * 60 * 60 * 1000;
+const QWEATHER_SOURCE_TYPE = 'weather';
+const QWEATHER_API_HOST = 'mh7mdaq86q.re.qweatherapi.com';
 const DEFAULT_RSS_SOURCES = [
   {
-    sourceKey: 'rss:https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=potd&feedformat=atom',
+    sourceKey: 'wikipotd',
     feedUrl: 'https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=potd&feedformat=atom',
     sourceLabel: 'Wikipedia Picture of Today'
   },
   {
-    sourceKey: 'rss:https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=onthisday&feedformat=atom',
+    sourceKey: 'wikionthisday',
     feedUrl: 'https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=onthisday&feedformat=atom',
     imageWidth: 250
   }
@@ -127,6 +130,92 @@ async function fetchFeedPreview(feedUrl) {
   });
   const text = await res.text();
   return { status: res.status, contentType: res.headers.get('content-type') || '', text };
+}
+
+function normalizeApiHost(host) {
+  if (!host) return '';
+  return /^https?:\/\//i.test(host) ? host.replace(/\/+$/g, '') : `https://${host.replace(/\/+$/g, '')}`;
+}
+
+function formatHourlyForecastTime(value) {
+  try {
+    return new Intl.DateTimeFormat('en-GB', {
+      timeZone: SHANGHAI_TIME_ZONE,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+      month: 'numeric',
+      day: 'numeric'
+    }).format(new Date(value));
+  } catch {
+    return value || '';
+  }
+}
+
+function isRainText(text) {
+  return /(rain|shower|drizzle|thunder|storm|雨|雷阵雨|阵雨)/i.test(String(text || ''));
+}
+
+function buildQWeatherSource(env) {
+  const location = env.QWEATHER_LOCATION || '';
+  const privateKey = env.QWEATHER_PRIVATE_KEY || env.qweather_key || '';
+  if (!location || !privateKey) return null;
+  return {
+    sourceKey: `weather:qweather:${location}:rain-6h`,
+    sourceType: QWEATHER_SOURCE_TYPE,
+    sourceLabel: env.QWEATHER_SOURCE_LABEL || 'Rain within 6 hours',
+    location
+  };
+}
+
+async function fetchQWeatherHourlyForecast(env, location) {
+  const apiHost = normalizeApiHost(env.QWEATHER_API_HOST || QWEATHER_API_HOST || 'https://api.qweather.com');
+  if (!apiHost) throw new Error('Missing QWEATHER_API_HOST');
+  const url = new URL('/v7/weather/24h', apiHost);
+  url.searchParams.set('location', location);
+
+  const res = await fetch(url.toString(), {
+    headers: {
+      Authorization: await buildQWeatherAuthorizationHeader(env),
+      Accept: 'application/json'
+    }
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(`QWeather request failed: ${res.status}`);
+  if (!data || data.code !== '200' || !Array.isArray(data.hourly)) {
+    throw new Error(`QWeather response invalid: ${data && data.code ? data.code : 'unknown'}`);
+  }
+  return data;
+}
+
+function buildRainAlertItem(forecast, sourceLabel) {
+  const hourly = Array.isArray(forecast.hourly) ? forecast.hourly.slice(0, 6) : [];
+  const rainyHour = hourly.find((hour) => {
+    const precip = Number(hour.precip || 0);
+    const pop = Number(hour.pop || 0);
+    return precip > 0 || (pop > 0 && isRainText(hour.text));
+  });
+  if (!rainyHour) return null;
+
+  const at = formatHourlyForecastTime(rainyHour.fxTime);
+  const details = [
+    rainyHour.text || '',
+    rainyHour.pop ? `PoP ${rainyHour.pop}%` : '',
+    Number(rainyHour.precip || 0) > 0 ? `Precip ${rainyHour.precip} mm` : ''
+  ].filter(Boolean).join(' · ');
+  const summaryText = `${sourceLabel} expected by ${at}. ${details}`.trim();
+
+  return {
+    title: sourceLabel,
+    description: summaryText,
+    summaryText,
+    summaryHtml: `<p>${escapeHtml(summaryText)}</p>`,
+    link: '',
+    imageUrl: '',
+    itemId: rainyHour.fxTime,
+    publishedAt: rainyHour.fxTime,
+    feedTitle: sourceLabel
+  };
 }
 
 function escapeHtml(str) {
@@ -469,6 +558,15 @@ async function processSourceItem(env, source, item, options = {}) {
   };
 }
 
+async function processQWeatherRainAlert(env) {
+  const source = buildQWeatherSource(env);
+  if (!source) return { skipped: true, reason: 'missing_qweather_location' };
+  const forecast = await fetchQWeatherHourlyForecast(env, source.location);
+  const item = buildRainAlertItem(forecast, source.sourceLabel);
+  if (!item) return { skipped: true, reason: 'no_rain_within_6h', sourceKey: source.sourceKey };
+  return processSourceItem(env, source, item, { cacheCurrent: false });
+}
+
 async function listSubscriptions(env) {
   const out = [];
   let cursor = undefined;
@@ -796,7 +894,9 @@ export default {
   async scheduled(controller, env, ctx) {
     const work = (async () => {
       initializeVapid(env);
-      if (controller.cron === '10 0 * * *') {
+      if (controller.cron === '0 */2 * * *') {
+        await processQWeatherRainAlert(env);
+      } else if (controller.cron === '10 0 * * *') {
         const feeds = await getScheduledRssSources(env);
         for (const feedConfig of feeds) {
           await refreshScheduledRssFeedState(env, feedConfig);
