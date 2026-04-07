@@ -1,19 +1,19 @@
 import { setVapidDetails, sendNotification } from './pwanotify.js';
 
 const SHANGHAI_TIME_ZONE = 'Asia/Shanghai';
-const WIKIPEDIA_POTD_FEED_URL = 'https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=potd&feedformat=atom';
-const WIKIPEDIA_ONTHISDAY_FEED_URL = 'https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=onthisday&feedformat=atom';
-const WIKIPEDIA_POTD_SOURCE_LABEL = 'Wikipedia Picture of Today';
 const HISTORY_KEY = 'history:items';
-const HISTORY_LIMIT = 100;
-const HISTORY_RETENTION_MS = 15 * 24 * 60 * 60 * 1000;
-const SCHEDULED_RSS_FEEDS = [
+const RSS_SOURCES_KEY = 'sources:rss';
+const HISTORY_LIMIT = 50;
+const HISTORY_RETENTION_MS = 3 * 24 * 60 * 60 * 1000;
+const DEFAULT_RSS_SOURCES = [
   {
-    feedUrl: WIKIPEDIA_POTD_FEED_URL,
-    sourceLabel: WIKIPEDIA_POTD_SOURCE_LABEL
+    sourceKey: 'rss:https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=potd&feedformat=atom',
+    feedUrl: 'https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=potd&feedformat=atom',
+    sourceLabel: 'Wikipedia Picture of Today'
   },
   {
-    feedUrl: WIKIPEDIA_ONTHISDAY_FEED_URL,
+    sourceKey: 'rss:https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=onthisday&feedformat=atom',
+    feedUrl: 'https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=onthisday&feedformat=atom',
     imageWidth: 250
   }
 ];
@@ -351,8 +351,16 @@ function getRssSourceKey(feedUrl) {
   return `rss:${feedUrl}`;
 }
 
-function getRssSourceLabel(feedUrl, fallbackLabel = '') {
-  return feedUrl === WIKIPEDIA_POTD_FEED_URL ? WIKIPEDIA_POTD_SOURCE_LABEL : (fallbackLabel || feedUrl);
+function normalizeRssSourceConfig(source) {
+  if (!source || !source.feedUrl) return null;
+  return {
+    ...source,
+    sourceKey: source.sourceKey || getRssSourceKey(source.feedUrl)
+  };
+}
+
+function getRssSourceLabel(feedConfig, itemTitle = '', feedTitle = '') {
+  return feedConfig?.sourceLabel || itemTitle || feedTitle || feedConfig?.feedUrl || '';
 }
 
 function resizeWikipediaThumb(url, width) {
@@ -369,20 +377,19 @@ function normalizeScheduledFeedItem(feedConfig, item) {
   };
 }
 
-function normalizeHistorySource(item) {
-  if (!item) return item;
-  const wikipediaSourceKey = getRssSourceKey(WIKIPEDIA_POTD_FEED_URL);
-  if (item.sourceKey === 'wikipedia-potd') {
-    return { ...item, sourceKey: wikipediaSourceKey, sourceLabel: WIKIPEDIA_POTD_SOURCE_LABEL };
+async function getScheduledRssSources(env) {
+  const stored = await getStateJson(env, RSS_SOURCES_KEY);
+  if (Array.isArray(stored) && stored.length > 0) {
+    return stored.map(normalizeRssSourceConfig).filter(Boolean);
   }
-  if (item.sourceKey === wikipediaSourceKey) {
-    return { ...item, sourceLabel: WIKIPEDIA_POTD_SOURCE_LABEL };
-  }
-  return item;
+  const seeded = DEFAULT_RSS_SOURCES.map(normalizeRssSourceConfig).filter(Boolean);
+  await putStateJson(env, RSS_SOURCES_KEY, seeded);
+  return seeded;
 }
 
-function getScheduledFeedConfig(feedUrl) {
-  return SCHEDULED_RSS_FEEDS.find((feed) => feed.feedUrl === feedUrl) || null;
+async function getScheduledFeedConfig(env, feedUrl) {
+  const feeds = await getScheduledRssSources(env);
+  return feeds.find((feed) => feed.feedUrl === feedUrl) || null;
 }
 
 async function getStateJson(env, key) {
@@ -419,7 +426,7 @@ async function refreshScheduledRssFeedState(env, feedConfig) {
   if (!item) throw new Error('Unable to parse scheduled feed');
   item.date = (item.publishedAt || '').slice(0, 10);
 
-  const sourceKey = getRssSourceKey(feedUrl);
+  const sourceKey = feedConfig.sourceKey || getRssSourceKey(feedUrl);
   const current = await getStateJson(env, getSourceCurrentKey(sourceKey));
   const changed = !current ||
     current.date !== item.date ||
@@ -576,8 +583,7 @@ export default {
       const rawItems = (await getStateJson(env, HISTORY_KEY) || []).filter((item) => {
         const createdAt = item && item.createdAt ? Date.parse(item.createdAt) : 0;
         return createdAt && (now - createdAt) <= HISTORY_RETENTION_MS;
-      }).map(normalizeHistorySource)
-        .sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0));
+      }).sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0));
       const items = rawItems.map((item) => ({
         ...item,
         summaryText: cleanHistoryBodyText(item.summaryText),
@@ -769,12 +775,12 @@ export default {
 
       const item = parseLatestFeedItem(preview.text);
       if (!item || !item.title) return new Response('Unable to parse latest feed item', { status: 422 });
-      const scheduledFeedConfig = getScheduledFeedConfig(feedUrl);
+      const scheduledFeedConfig = await getScheduledFeedConfig(env, feedUrl);
       const normalizedItem = normalizeScheduledFeedItem(scheduledFeedConfig, item);
       const result = await processSourceItem(env, {
-        sourceKey: getRssSourceKey(feedUrl),
+        sourceKey: scheduledFeedConfig?.sourceKey || getRssSourceKey(feedUrl),
         sourceType: 'rss',
-        sourceLabel: getRssSourceLabel(feedUrl, normalizedItem.feedTitle || feedUrl)
+        sourceLabel: getRssSourceLabel(scheduledFeedConfig, normalizedItem.title || '', normalizedItem.feedTitle || feedUrl)
       }, normalizedItem, { cacheCurrent: false });
       return json({
         ok: !result.skipped && result.failed === 0,
@@ -791,18 +797,20 @@ export default {
     const work = (async () => {
       initializeVapid(env);
       if (controller.cron === '10 0 * * *') {
-        for (const feedConfig of SCHEDULED_RSS_FEEDS) {
+        const feeds = await getScheduledRssSources(env);
+        for (const feedConfig of feeds) {
           await refreshScheduledRssFeedState(env, feedConfig);
         }
       } else if (controller.cron === '30 0 * * *') {
-        for (const feedConfig of SCHEDULED_RSS_FEEDS) {
-          const sourceKey = getRssSourceKey(feedConfig.feedUrl);
+        const feeds = await getScheduledRssSources(env);
+        for (const feedConfig of feeds) {
+          const sourceKey = feedConfig.sourceKey || getRssSourceKey(feedConfig.feedUrl);
           const item = await getStateJson(env, getSourceCurrentKey(sourceKey));
           if (item) {
             await processSourceItem(env, {
               sourceKey,
               sourceType: 'rss',
-              sourceLabel: getRssSourceLabel(feedConfig.feedUrl, item.feedTitle || feedConfig.feedUrl)
+              sourceLabel: getRssSourceLabel(feedConfig, item.title || '', item.feedTitle || feedConfig.feedUrl)
             }, item);
           }
         }

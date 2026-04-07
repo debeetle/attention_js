@@ -15,9 +15,12 @@
         @font-face {
             font-family: 'Source Code Pro';
             src: url('SourceCodePro-Regular.ttf.woff2') format('woff2');
-            /* font-weight: 400; */
-            /* font-style: normal;
-            font-display: swap; */
+        }
+
+        html,
+        body {
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
         }
 
         #enable-notifications {
@@ -25,10 +28,12 @@
         }
 
         .notification {
-            margin: 0.5rem 0;
-            padding: 5px;
-            border: 2px solid #5a5a5a;
+            margin: 1rem 0;
+            padding: 6px;
+            border: 2px solid #888;
             border-radius: 10px;
+            text-align: justify;
+            text-justify: inter-ideograph; /* 专门针对中日韩字符 */
         }
 
         .notification.no-image {
@@ -37,41 +42,6 @@
             gap: 1rem;
         }
 
-        .picture {
-            display: block;
-            max-width: 100%;
-            height: auto;
-            width: 100%;
-        }
-
-        .picture-wrap {
-            position: relative;
-            overflow: hidden;
-            border-radius: 5px;
-        }
-
-        .picture-overlay {
-            position: absolute;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            padding: 0.5rem;
-            background: linear-gradient(to top, rgba(0, 0, 0, 0.82), rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0));
-            color: rgba(255, 255, 255, 0.78);
-        }
-
-        .picture-title {
-            font-family: sans-serif;
-            font-weight: bold;
-            color: rgba(255, 255, 255, 0.72);
-        }
-
-        .picture-time {
-            color: rgba(255, 255, 255, 0.72);
-            font-family: sans-serif;
-            font-size: 0.8rem;
-            font-weight: bold;
-        }
 
         .favicon {
             display: block;
@@ -90,14 +60,6 @@
             font-weight: bold;
         }
 
-        /* .body {
-            margin: 0;
-        } */
-
-        p {
-            margin: 0;
-        }
-
         .notification-time-row {
             text-align: right;
         }
@@ -111,6 +73,62 @@
                 border-color: #5a5a5a;
             }
         }
+
+        /* wiki potd start*/
+        .picture {
+            display: block;
+            max-width: 100%;
+            height: auto;
+            width: 100%;
+        }
+
+        .picture-wrap {
+            position: relative;
+            overflow: hidden;
+            border-radius: 4px;
+            border: 1px solid #eee;
+        }
+
+        .picture-overlay {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            padding: 0.5rem;
+            color: rgba(255, 255, 255, 0.8);
+            display: inline-block;
+            background: rgba(28, 24, 20, 0.2);
+            -webkit-backdrop-filter: blur(1rem);
+            backdrop-filter: blur(1rem);
+        }
+
+        .picture-title {
+            font-family: sans-serif;
+            font-weight: bold;
+            color: inherit;
+        }
+
+        .picture-time {
+            color: inherit;
+            font-family: sans-serif;
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+
+        p {
+            margin: 0;
+        }
+
+        /* wiki potd end */
+
+        /* wiki onthisday start */
+        ul {
+            margin: 0;
+            list-style-type: none;
+            padding-left: 0;
+        }
+
+        /* wiki onthisday end */
     </style>
 </head>
 
@@ -127,12 +145,12 @@
             root.replaceChildren();
             if (!payload || !payload.ok || !Array.isArray(payload.items)) return;
 
-            for (const item of payload.items) {
-                root.appendChild(buildNotification(item));
+            for (const [index, item] of payload.items.entries()) {
+                root.appendChild(buildNotification(item, index));
             }
         }
 
-        function buildNotification(item) {
+        function buildNotification(item, index) {
             const notification = document.createElement('article');
             notification.className = `notification${item.imageUrl ? '' : ' no-image'}`;
 
@@ -150,6 +168,9 @@
                 picture.className = 'picture';
                 picture.src = item.imageUrl;
                 picture.alt = item.title || item.sourceLabel || '';
+                picture.decoding = 'async';
+                picture.loading = index === 0 ? 'eager' : 'lazy';
+                picture.fetchPriority = index === 0 ? 'high' : 'low';
                 pictureWrap.appendChild(picture);
 
                 const overlay = document.createElement('div');
@@ -160,7 +181,7 @@
                 title.textContent = displayLabel(item);
                 overlay.appendChild(title);
 
-                if (item.publishedAt) {
+                if (item.publishedAt && shouldShowPictureTime(item)) {
                     const time = document.createElement('div');
                     time.className = 'time picture-time';
                     time.textContent = formatChinaTime(item.publishedAt);
@@ -180,6 +201,9 @@
             favicon.className = 'favicon';
             favicon.src = faviconFor(item.link);
             favicon.alt = item.title || item.sourceLabel || '';
+            favicon.decoding = 'async';
+            favicon.loading = 'lazy';
+            favicon.fetchPriority = 'low';
             left.appendChild(favicon);
             appendTitle(left, item);
 
@@ -214,13 +238,22 @@
             const body = document.createElement('div');
             body.className = 'body';
             if (item.summaryHtml) {
-                body.innerHTML = removeEmbeddedImages(truncateHtmlToSentences(item.summaryHtml, 3));
+                body.innerHTML = normalizeBodyHtml(truncateHtmlToSentences(item.summaryHtml, 3));
             }
 
             parent.appendChild(body);
         }
 
-        function removeEmbeddedImages(html) {
+        function unwrapElement(element) {
+            const parent = element.parentNode;
+            if (!parent) return;
+            while (element.firstChild) {
+                parent.insertBefore(element.firstChild, element);
+            }
+            element.remove();
+        }
+
+        function normalizeBodyHtml(html) {
             if (!html) return '';
             const template = document.createElement('template');
             template.innerHTML = html;
@@ -229,7 +262,11 @@
                 image.remove();
             }
 
-            for (const empty of Array.from(template.content.querySelectorAll('table, tbody, tr, td, div, span, p'))) {
+            for (const cell of Array.from(template.content.querySelectorAll('table, tbody, tr, td'))) {
+                unwrapElement(cell);
+            }
+
+            for (const empty of Array.from(template.content.querySelectorAll('div, span, p'))) {
                 if (empty.children.length === 0 && !empty.textContent.trim()) {
                     empty.remove();
                 }
@@ -299,6 +336,10 @@
 
         function displayLabel(item) {
             return item.sourceLabel || item.title || 'Notification';
+        }
+
+        function shouldShowPictureTime(item) {
+            return item.sourceKey !== 'rss:https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=onthisday&feedformat=atom';
         }
 
         function faviconFor(link) {
