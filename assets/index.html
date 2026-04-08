@@ -6,15 +6,26 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Attention</title>
     <link rel="manifest" href="/manifest.webmanifest">
-    <link rel="icon" type="image/png" href="/icon.png">
-    <link rel="apple-touch-icon" href="/icon.png">
+    <link rel="icon" type="image/png" href="/figure/icon.png">
+    <link rel="apple-touch-icon" href="/figure/icon.png">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black">
     <meta name="apple-mobile-web-app-title" content="Attention">
     <style>
+        #permission-grant {
+            display: none;
+        }
         @font-face {
-            font-family: 'Source Code Pro';
-            src: url('SourceCodePro-Regular.ttf.woff2') format('woff2');
+            font-family: 'SCP';
+            src: url('font/SourceCodePro-VariableFont_wght.ttf');
+        }
+        @font-face {
+            font-family: 'LM Math';
+            src: url('font/latinmodern-math.otf');
+        }
+        @font-face {
+            font-family: 'STZhongsong';
+            src: url('font/STZHONGS.TTF');
         }
 
         html,
@@ -23,55 +34,45 @@
             scrollbar-width: none;
         }
 
-        #enable-notifications {
-            display: none;
-        }
-
         .notification {
-            margin: 1rem 0;
-            padding: 6px;
+            margin: 1rem 0 1rem 0;
+            padding: 8px;
             border: 2px solid #888;
-            border-radius: 10px;
-            text-align: justify;
-            text-justify: inter-ideograph; /* 专门针对中日韩字符 */
+            border-radius: 15px;
+        }
+        
+        a {
+            text-decoration: none;
         }
 
-        .notification.no-image {
+        .article-text {
+            font-family: "LM Math";
+        }
+
+        /* .article-text.zh {
+            font-family: "STZhongsong";
+        } */
+
+        .no-image-header {
             display: grid;
-            grid-template-columns: 30% 70%;
-            gap: 1rem;
+            grid-template-columns: 10% 1fr;
+            font-family: "STZhongsong";
         }
-
 
         .favicon {
-            display: block;
             width: 100%;
             height: auto;
         }
 
-        .title {
-            font-family: sans-serif;
-            font-weight: bold;
-        }
-
-        .time {
+        .notification-meta {
             font-family: sans-serif;
             font-size: 0.8rem;
             font-weight: bold;
-        }
-
-        .notification-time-row {
-            text-align: right;
+            color: #ccc;
         }
 
         :root {
             color-scheme: light dark;
-        }
-
-        @media (prefers-color-scheme: dark) {
-            .notification {
-                border-color: #5a5a5a;
-            }
         }
 
         /* wiki potd start*/
@@ -85,7 +86,7 @@
         .picture-wrap {
             position: relative;
             overflow: hidden;
-            border-radius: 4px;
+            border-radius: 7px;
             border: 1px solid #eee;
         }
 
@@ -95,45 +96,50 @@
             right: 0;
             bottom: 0;
             padding: 0.5rem;
+            font-family: sans-serif;
+            font-weight: bold;
             color: rgba(255, 255, 255, 0.8);
-            display: inline-block;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 0.75rem;
             background: rgba(28, 24, 20, 0.2);
             -webkit-backdrop-filter: blur(1rem);
             backdrop-filter: blur(1rem);
         }
 
-        .picture-title {
-            font-family: sans-serif;
-            font-weight: bold;
-            color: inherit;
-        }
-
-        .picture-time {
-            color: inherit;
-            font-family: sans-serif;
-            font-size: 0.8rem;
-            font-weight: bold;
-        }
-
-        p {
-            margin: 0;
+        .picture-source-logo {
+            /* display: block; */
+            width: auto;
+            height: 1.5rem;
+            /* flex: 0 0 auto; */
         }
 
         /* wiki potd end */
 
         /* wiki onthisday start */
         ul {
-            margin: 0;
+            margin-top: 0;
             list-style-type: none;
             padding-left: 0;
         }
-
         /* wiki onthisday end */
+
+        @media (prefers-color-scheme: dark) {
+            .notification {
+                border-color: #5a5a5a;
+            }
+            .picture-wrap {
+                border-color: #282a36;
+            }
+        }
+
+
     </style>
 </head>
 
 <body>
-    <button id="enable-notifications">Enable Notifications</button>
+    <button id="permission-grant">Enable Notifications</button>
     <section id="history"></section>
 
     <script>
@@ -167,7 +173,7 @@
                 const picture = document.createElement('img');
                 picture.className = 'picture';
                 picture.src = item.imageUrl;
-                picture.alt = item.title || item.sourceLabel || '';
+                picture.alt = item.imageAlt || '';
                 picture.decoding = 'async';
                 picture.loading = index === 0 ? 'eager' : 'lazy';
                 picture.fetchPriority = index === 0 ? 'high' : 'low';
@@ -176,16 +182,20 @@
                 const overlay = document.createElement('div');
                 overlay.className = 'picture-overlay';
 
-                const title = document.createElement('div');
-                title.className = 'picture-title';
-                title.textContent = displayLabel(item);
-                overlay.appendChild(title);
+                if (item.imageAlt) {
+                    const title = document.createElement('div');
+                    title.className = 'picture-title';
+                    title.textContent = item.imageAlt;
+                    overlay.appendChild(title);
+                }
 
-                if (item.publishedAt && shouldShowPictureTime(item)) {
-                    const time = document.createElement('div');
-                    time.className = 'time picture-time';
-                    time.textContent = formatChinaTime(item.publishedAt);
-                    overlay.appendChild(time);
+                if (item.sourceKey === 'WikiPOTD' || item.sourceKey === 'WikiOnThisDay') {
+                    const logo = document.createElement('img');
+                    logo.className = 'picture-source-logo';
+                    logo.src = '/figure/Wikipedia-logo-v2.svg';
+                    logo.alt = 'Wikipedia';
+                    logo.decoding = 'async';
+                    overlay.appendChild(logo);
                 }
 
                 pictureWrap.appendChild(overlay);
@@ -193,55 +203,54 @@
                 notification.appendChild(pictureWrap);
 
                 appendBody(notification, item);
+                appendMetaRow(notification, item);
                 return notification;
             }
 
-            const left = document.createElement('div');
+            const header = document.createElement('div');
+            header.className = 'no-image-header';
+
+            const logo = document.createElement('div');
             const favicon = document.createElement('img');
             favicon.className = 'favicon';
-            favicon.src = faviconFor(item.link);
-            favicon.alt = item.title || item.sourceLabel || '';
+            favicon.src = sourceIconFor(item);
+            favicon.alt = item.sourceKey || '';
             favicon.decoding = 'async';
             favicon.loading = 'lazy';
             favicon.fetchPriority = 'low';
-            left.appendChild(favicon);
-            appendTitle(left, item);
+            logo.appendChild(favicon);
+            header.appendChild(logo);
 
-            const right = document.createElement('div');
-            appendBody(right, item);
+            const title = document.createElement('div');
+            title.style.paddingLeft = "1rem";
+            title.textContent = item.title || '';
+            header.appendChild(title);
 
-            notification.appendChild(left);
-            notification.appendChild(right);
-            appendTimeRow(notification, item);
+            notification.appendChild(header);
+            appendBody(notification, item);
+            appendMetaRow(notification, item);
             return notification;
         }
 
-        function appendTitle(parent, item) {
-            const title = document.createElement('div');
-            title.className = 'title';
-            title.textContent = displayLabel(item);
-            parent.appendChild(title);
-        }
-
-        function appendTimeRow(parent, item) {
-            if (!item.publishedAt) return;
+        function appendMetaRow(parent, item) {
             const row = document.createElement('div');
-            row.className = 'notification-time-row';
-            const time = document.createElement('div');
-            time.className = 'time';
-            time.textContent = formatChinaTime(item.publishedAt);
-            row.appendChild(time);
+            row.className = 'notification-meta';
+            row.textContent = item.sourceKey + ' ' + elapsedHoursText(item.publishedAt);
+
             parent.appendChild(row);
         }
 
         function appendBody(parent, item) {
-            const body = document.createElement('div');
-            body.className = 'body';
+            const articleText = document.createElement('div');
+            articleText.className = 'article-text';
+            if (item.lang === 'zh') {
+                articleText.style.fontFamily = "STZhongsong";
+            }
             if (item.summaryHtml) {
-                body.innerHTML = normalizeBodyHtml(truncateHtmlToSentences(item.summaryHtml, 3));
+                articleText.innerHTML = normalizeBodyHtml(truncateHtmlToSentences(item.summaryHtml, 3));
             }
 
-            parent.appendChild(body);
+            parent.appendChild(articleText);
         }
 
         function unwrapElement(element) {
@@ -260,6 +269,10 @@
 
             for (const image of Array.from(template.content.querySelectorAll('img'))) {
                 image.remove();
+            }
+
+            for (const media of Array.from(template.content.querySelectorAll('#mp-otd-img'))) {
+                media.remove();
             }
 
             for (const cell of Array.from(template.content.querySelectorAll('table, tbody, tr, td'))) {
@@ -334,14 +347,6 @@
             return true;
         }
 
-        function displayLabel(item) {
-            return item.sourceLabel || item.title || 'Notification';
-        }
-
-        function shouldShowPictureTime(item) {
-            return item.sourceKey !== 'rss:https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=onthisday&feedformat=atom';
-        }
-
         function faviconFor(link) {
             try {
                 if (!link) return '/icon.png';
@@ -352,23 +357,18 @@
             }
         }
 
-        function formatChinaTime(value) {
-            try {
-                const date = new Date(value);
-                const parts = new Intl.DateTimeFormat('en-GB', {
-                    timeZone: 'Asia/Shanghai',
-                    year: 'numeric',
-                    month: 'short',
-                    day: 'numeric',
-                    hour: 'numeric',
-                    minute: '2-digit',
-                    hour12: false
-                }).formatToParts(date);
-                const get = (type) => parts.find((part) => part.type === type)?.value || '';
-                return `${String(get('month')).toUpperCase()} ${Number(get('day'))}, ${get('year')} AT ${Number(get('hour'))}:${get('minute')}`;
-            } catch {
-                return value;
+        function sourceIconFor(item) {
+            if ((item.sourceKey || '').startsWith('Wiki')) {
+                return '/figure/Wikipedia-logo-v2.svg';
             }
+            return faviconFor(item.link);
+        }
+
+        function elapsedHoursText(value) {
+            const publishedAt = Date.parse(value || '');
+            if (!Number.isFinite(publishedAt)) return '';
+            const hours = Math.max(0, Math.floor((Date.now() - publishedAt) / (60 * 60 * 1000)));
+            return `${hours} ${hours === 1 ? 'hour' : 'hours'}`;
         }
 
         async function loadHistory() {
@@ -418,14 +418,14 @@
                 });
 
                 hasSubscribed = true;
-                const button = document.getElementById('enable-notifications');
+                const button = document.getElementById('permission-grant');
                 if (button) button.style.display = 'none';
             } catch {
             }
         }
 
         window.addEventListener('load', async () => {
-            const button = document.getElementById('enable-notifications');
+            const button = document.getElementById('permission-grant');
             loadHistory();
 
             try {

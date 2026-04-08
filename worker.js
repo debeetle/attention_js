@@ -10,12 +10,11 @@ const QWEATHER_SOURCE_TYPE = 'weather';
 const QWEATHER_API_HOST = 'mh7mdaq86q.re.qweatherapi.com';
 const DEFAULT_RSS_SOURCES = [
   {
-    sourceKey: 'wikipotd',
-    feedUrl: 'https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=potd&feedformat=atom',
-    sourceLabel: 'Wikipedia Picture of Today'
+    sourceKey: 'WikiPOTD',
+    feedUrl: 'https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=potd&feedformat=atom'
   },
   {
-    sourceKey: 'wikionthisday',
+    sourceKey: 'WikiOnThisDay',
     feedUrl: 'https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=onthisday&feedformat=atom',
     imageWidth: 250
   }
@@ -161,9 +160,8 @@ function buildQWeatherSource(env) {
   const privateKey = env.QWEATHER_PRIVATE_KEY || env.qweather_key || '';
   if (!location || !privateKey) return null;
   return {
-    sourceKey: `weather:qweather:${location}:rain-6h`,
+    sourceKey: 'Weather',
     sourceType: QWEATHER_SOURCE_TYPE,
-    sourceLabel: env.QWEATHER_SOURCE_LABEL || 'Rain within 6 hours',
     location
   };
 }
@@ -188,7 +186,7 @@ async function fetchQWeatherHourlyForecast(env, location) {
   return data;
 }
 
-function buildRainAlertItem(forecast, sourceLabel) {
+function buildRainAlertItem(forecast, sourceKey) {
   const hourly = Array.isArray(forecast.hourly) ? forecast.hourly.slice(0, 6) : [];
   const rainyHour = hourly.find((hour) => {
     const precip = Number(hour.precip || 0);
@@ -203,18 +201,17 @@ function buildRainAlertItem(forecast, sourceLabel) {
     rainyHour.pop ? `PoP ${rainyHour.pop}%` : '',
     Number(rainyHour.precip || 0) > 0 ? `Precip ${rainyHour.precip} mm` : ''
   ].filter(Boolean).join(' · ');
-  const summaryText = `${sourceLabel} expected by ${at}. ${details}`.trim();
+  const summaryText = `${sourceKey} expected by ${at}. ${details}`.trim();
 
   return {
-    title: sourceLabel,
+    title: sourceKey,
     description: summaryText,
     summaryText,
     summaryHtml: `<p>${escapeHtml(summaryText)}</p>`,
     link: '',
     imageUrl: '',
     itemId: rainyHour.fxTime,
-    publishedAt: rainyHour.fxTime,
-    feedTitle: sourceLabel
+    publishedAt: rainyHour.fxTime
   };
 }
 
@@ -311,8 +308,33 @@ function firstMatch(text, patterns) {
   return '';
 }
 
+function extractHtmlAttribute(tag, name) {
+  if (!tag || !name) return '';
+  const match = tag.match(new RegExp(`\\b${name}\\s*=\\s*["']([^"']*)["']`, 'i'));
+  return match ? decodeXmlEntities(match[1]) : '';
+}
+
+function extractPrimaryImage(summaryHtml, baseUrl = '') {
+  const imageTag = summaryHtml.match(/<img\b[^>]*>/i)?.[0] || '';
+  const imageSrc = extractHtmlAttribute(imageTag, 'src');
+  if (imageSrc) {
+    return {
+      imageUrl: toAbsoluteUrl(imageSrc, baseUrl),
+      imageAlt: extractHtmlAttribute(imageTag, 'alt')
+    };
+  }
+
+  return {
+    imageUrl: toAbsoluteUrl(firstMatch(summaryHtml, [
+      /<media:content[^>]*url=["']([^"']+)["'][^>]*\/?>/i,
+      /<media:thumbnail[^>]*url=["']([^"']+)["'][^>]*\/?>/i
+    ]), baseUrl),
+    imageAlt: ''
+  };
+}
+
 function parseFeedItemBlock(itemBlock, feedMeta) {
-  const { feedTitle = '', baseUrl = '' } = feedMeta || {};
+  const { baseUrl = '' } = feedMeta || {};
   const title = stripTags(firstMatch(itemBlock, [
     /<title[^>]*>([\s\S]*?)<\/title>/i
   ]));
@@ -341,22 +363,14 @@ function parseFeedItemBlock(itemBlock, feedMeta) {
   const description = truncateToSentence(stripTags(firstMatch(decodedSummaryHtml, [
     /<p\b[^>]*>([\s\S]*?)<\/p>/i
   ]) || decodedSummaryHtml), 180);
-  const imageUrl = toAbsoluteUrl(firstMatch(decodedSummaryHtml, [
-    /<img[^>]*src=["']([^"']+)["'][^>]*>/i,
-    /<media:content[^>]*url=["']([^"']+)["'][^>]*\/?>/i,
-    /<media:thumbnail[^>]*url=["']([^"']+)["'][^>]*\/?>/i
-  ]), baseUrl || link);
+  const { imageUrl, imageAlt } = extractPrimaryImage(decodedSummaryHtml, baseUrl || link);
   const summaryHtml = sanitizeSummaryHtml(decodedSummaryHtml, description, baseUrl || link);
 
-  return { feedTitle, title, link, description, summaryText: description, summaryHtml, imageUrl, itemId, publishedAt };
+  return { title, link, description, summaryText: description, summaryHtml, imageUrl, imageAlt, itemId, publishedAt };
 }
 
 function parseLatestFeedItem(feedText) {
   const feedMeta = {
-    feedTitle: stripTags(firstMatch(feedText, [
-      /<channel\b[^>]*>[\s\S]*?<title>([\s\S]*?)<\/title>/i,
-      /<feed\b[^>]*>[\s\S]*?<title[^>]*>([\s\S]*?)<\/title>/i
-    ])),
     baseUrl: decodeXmlEntities(firstMatch(feedText, [
       /<link[^>]*rel=["']alternate["'][^>]*href=["']([^"']+)["'][^>]*\/?>/i,
       /<link[^>]*href=["']([^"']+)["'][^>]*\/?>/i
@@ -397,7 +411,7 @@ function sanitizeSummaryHtml(summaryHtml, summaryText, baseUrl = '') {
 function buildNotificationPayload(item) {
   const notification = {
     title: item.title,
-    body: item.summaryText || item.description || item.feedTitle || 'New item',
+    body: item.summaryText || item.description || 'New item',
     silent: false,
     app_badge: '1'
   };
@@ -413,12 +427,12 @@ function buildHistoryItem(source, item, itemKey, sentAt = new Date().toISOString
     id: `${source.sourceKey}:${itemKey}`,
     sourceKey: source.sourceKey,
     sourceType: source.sourceType,
-    sourceLabel: source.sourceLabel,
     title: item.title,
     summaryText: item.summaryText || item.description || '',
     summaryHtml: item.summaryHtml || '',
     link: item.link || '',
     imageUrl: item.imageUrl || '',
+    imageAlt: item.imageAlt || '',
     publishedAt: item.publishedAt || item.updatedAt || '',
     createdAt: sentAt
   };
@@ -446,10 +460,6 @@ function normalizeRssSourceConfig(source) {
     ...source,
     sourceKey: source.sourceKey || getRssSourceKey(source.feedUrl)
   };
-}
-
-function getRssSourceLabel(feedConfig, itemTitle = '', feedTitle = '') {
-  return feedConfig?.sourceLabel || itemTitle || feedTitle || feedConfig?.feedUrl || '';
 }
 
 function resizeWikipediaThumb(url, width) {
@@ -522,7 +532,8 @@ async function refreshScheduledRssFeedState(env, feedConfig) {
     current.title !== item.title ||
     current.link !== item.link ||
     current.summaryText !== item.summaryText ||
-    current.imageUrl !== item.imageUrl;
+    current.imageUrl !== item.imageUrl ||
+    current.imageAlt !== item.imageAlt;
 
   if (changed) {
     await putStateJson(env, getSourceCurrentKey(sourceKey), item);
@@ -562,7 +573,7 @@ async function processQWeatherRainAlert(env) {
   const source = buildQWeatherSource(env);
   if (!source) return { skipped: true, reason: 'missing_qweather_location' };
   const forecast = await fetchQWeatherHourlyForecast(env, source.location);
-  const item = buildRainAlertItem(forecast, source.sourceLabel);
+  const item = buildRainAlertItem(forecast, source.sourceKey);
   if (!item) return { skipped: true, reason: 'no_rain_within_6h', sourceKey: source.sourceKey };
   return processSourceItem(env, source, item, { cacheCurrent: false });
 }
@@ -615,9 +626,8 @@ async function handleWebSubDelivery(env, rawBody, fallbackUrl = '') {
   const item = parseLatestFeedItem(text);
   if (!item || !item.title) return { ok: false, reason: 'unable_to_parse_feed_item' };
   return processSourceItem(env, {
-    sourceKey: fallbackUrl ? `websub:${fallbackUrl}` : `websub:${item.feedTitle || 'unknown'}`,
-    sourceType: 'websub',
-    sourceLabel: item.feedTitle || fallbackUrl || 'WebSub'
+    sourceKey: fallbackUrl ? `websub:${fallbackUrl}` : 'websub:unknown',
+    sourceType: 'websub'
   }, item, { cacheCurrent: false });
 }
 
@@ -633,13 +643,11 @@ async function handleWebhookDelivery(env, rawBody, contentType = '') {
     link: body.link || '',
     imageUrl: body.imageUrl || '',
     itemId: body.itemKey || body.id || body.link || '',
-    publishedAt: body.publishedAt || new Date().toISOString(),
-    feedTitle: body.sourceLabel || body.sourceKey || 'Webhook'
+    publishedAt: body.publishedAt || new Date().toISOString()
   };
   return processSourceItem(env, {
     sourceKey: body.sourceKey || 'webhook:default',
-    sourceType: 'webhook',
-    sourceLabel: body.sourceLabel || body.sourceKey || 'Webhook'
+    sourceType: 'webhook'
   }, item, { cacheCurrent: false });
 }
 
@@ -877,8 +885,7 @@ export default {
       const normalizedItem = normalizeScheduledFeedItem(scheduledFeedConfig, item);
       const result = await processSourceItem(env, {
         sourceKey: scheduledFeedConfig?.sourceKey || getRssSourceKey(feedUrl),
-        sourceType: 'rss',
-        sourceLabel: getRssSourceLabel(scheduledFeedConfig, normalizedItem.title || '', normalizedItem.feedTitle || feedUrl)
+        sourceType: 'rss'
       }, normalizedItem, { cacheCurrent: false });
       return json({
         ok: !result.skipped && result.failed === 0,
@@ -909,8 +916,7 @@ export default {
           if (item) {
             await processSourceItem(env, {
               sourceKey,
-              sourceType: 'rss',
-              sourceLabel: getRssSourceLabel(feedConfig, item.title || '', item.feedTitle || feedConfig.feedUrl)
+              sourceType: 'rss'
             }, item);
           }
         }
