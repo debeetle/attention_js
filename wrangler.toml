@@ -7,6 +7,7 @@ placement = { mode = "smart" }
 
 [vars]
 VAPID_PUBLIC_KEY = "BJOm2JBG6kQe5CGPhT-SDrv6VpzdtwCANzJKvRZBBawY8eJ0rxeKtftDGNZS6BdCrjDzqZ0PpE-CMkp9SjNnwDs"
+QWEATHER_LOCATION = "101280610"
 
 [assets]
 directory = "./assets"

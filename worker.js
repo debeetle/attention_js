@@ -3,10 +3,8 @@ import { buildQWeatherAuthorizationHeader } from './qweather-jwt.js';
 
 const SHANGHAI_TIME_ZONE = 'Asia/Shanghai';
 const HISTORY_KEY = 'history:items';
-const RSS_SOURCES_KEY = 'sources:rss';
 const HISTORY_LIMIT = 50;
 const HISTORY_RETENTION_MS = 3 * 24 * 60 * 60 * 1000;
-const QWEATHER_SOURCE_TYPE = 'weather';
 const QWEATHER_API_HOST = 'mh7mdaq86q.re.qweatherapi.com';
 const DEFAULT_RSS_SOURCES = [
   {
@@ -17,6 +15,11 @@ const DEFAULT_RSS_SOURCES = [
     sourceKey: 'WikiOnThisDay',
     feedUrl: 'https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=onthisday&feedformat=atom',
     imageWidth: 250
+  },
+  {
+    sourceKey: 'WikiDYK',
+    feedUrl: 'https://zh.wikipedia.org/w/api.php?action=featuredfeed&feed=dyk&feedformat=atom',
+    lang: 'zh'
   }
 ];
 
@@ -161,13 +164,13 @@ function buildQWeatherSource(env) {
   if (!location || !privateKey) return null;
   return {
     sourceKey: 'Weather',
-    sourceType: QWEATHER_SOURCE_TYPE,
+    sourceType: 'weather',
     location
   };
 }
 
 async function fetchQWeatherHourlyForecast(env, location) {
-  const apiHost = normalizeApiHost(env.QWEATHER_API_HOST || QWEATHER_API_HOST || 'https://api.qweather.com');
+  const apiHost = normalizeApiHost(QWEATHER_API_HOST);
   if (!apiHost) throw new Error('Missing QWEATHER_API_HOST');
   const url = new URL('/v7/weather/24h', apiHost);
   url.searchParams.set('location', location);
@@ -422,22 +425,6 @@ function buildNotificationPayload(item) {
   };
 }
 
-function buildHistoryItem(source, item, itemKey, sentAt = new Date().toISOString()) {
-  return {
-    id: `${source.sourceKey}:${itemKey}`,
-    sourceKey: source.sourceKey,
-    sourceType: source.sourceType,
-    title: item.title,
-    summaryText: item.summaryText || item.description || '',
-    summaryHtml: item.summaryHtml || '',
-    link: item.link || '',
-    imageUrl: item.imageUrl || '',
-    imageAlt: item.imageAlt || '',
-    publishedAt: item.publishedAt || item.updatedAt || '',
-    createdAt: sentAt
-  };
-}
-
 function getSourceCurrentKey(sourceKey) {
   return `source:current:${sourceKey}`;
 }
@@ -448,18 +435,6 @@ function getSourceLastItemKey(sourceKey) {
 
 function deriveItemKey(item) {
   return item.itemId || item.link || `${item.title}::${item.publishedAt || item.updatedAt || ''}`;
-}
-
-function getRssSourceKey(feedUrl) {
-  return `rss:${feedUrl}`;
-}
-
-function normalizeRssSourceConfig(source) {
-  if (!source || !source.feedUrl) return null;
-  return {
-    ...source,
-    sourceKey: source.sourceKey || getRssSourceKey(source.feedUrl)
-  };
 }
 
 function resizeWikipediaThumb(url, width) {
@@ -476,19 +451,8 @@ function normalizeScheduledFeedItem(feedConfig, item) {
   };
 }
 
-async function getScheduledRssSources(env) {
-  const stored = await getStateJson(env, RSS_SOURCES_KEY);
-  if (Array.isArray(stored) && stored.length > 0) {
-    return stored.map(normalizeRssSourceConfig).filter(Boolean);
-  }
-  const seeded = DEFAULT_RSS_SOURCES.map(normalizeRssSourceConfig).filter(Boolean);
-  await putStateJson(env, RSS_SOURCES_KEY, seeded);
-  return seeded;
-}
-
-async function getScheduledFeedConfig(env, feedUrl) {
-  const feeds = await getScheduledRssSources(env);
-  return feeds.find((feed) => feed.feedUrl === feedUrl) || null;
+function getScheduledFeedConfig(feedUrl) {
+  return DEFAULT_RSS_SOURCES.find((feed) => feed.feedUrl === feedUrl) || null;
 }
 
 async function getStateJson(env, key) {
@@ -525,7 +489,7 @@ async function refreshScheduledRssFeedState(env, feedConfig) {
   if (!item) throw new Error('Unable to parse scheduled feed');
   item.date = (item.publishedAt || '').slice(0, 10);
 
-  const sourceKey = feedConfig.sourceKey || getRssSourceKey(feedUrl);
+  const sourceKey = feedConfig.sourceKey;
   const current = await getStateJson(env, getSourceCurrentKey(sourceKey));
   const changed = !current ||
     current.date !== item.date ||
@@ -558,7 +522,17 @@ async function processSourceItem(env, source, item, options = {}) {
 
   const result = await sendToAllSubscriptions(env, buildNotificationPayload(item));
   await env.SUBS.put(getSourceLastItemKey(source.sourceKey), itemKey);
-  const historyItem = buildHistoryItem(source, item, itemKey);
+  const historyItem = {
+    id: `${source.sourceKey}:${itemKey}`,
+    sourceKey: source.sourceKey,
+    lang: source.lang || '',
+    summaryHtml: item.summaryHtml || '',
+    link: item.link || '',
+    imageUrl: item.imageUrl || '',
+    imageAlt: item.imageAlt || '',
+    publishedAt: item.publishedAt || item.updatedAt || '',
+    createdAt: new Date().toISOString()
+  };
   await appendHistoryItem(env, historyItem);
   return {
     skipped: false,
@@ -881,11 +855,12 @@ export default {
 
       const item = parseLatestFeedItem(preview.text);
       if (!item || !item.title) return new Response('Unable to parse latest feed item', { status: 422 });
-      const scheduledFeedConfig = await getScheduledFeedConfig(env, feedUrl);
+      const scheduledFeedConfig = getScheduledFeedConfig(feedUrl);
       const normalizedItem = normalizeScheduledFeedItem(scheduledFeedConfig, item);
       const result = await processSourceItem(env, {
-        sourceKey: scheduledFeedConfig?.sourceKey || getRssSourceKey(feedUrl),
-        sourceType: 'rss'
+        sourceKey: scheduledFeedConfig?.sourceKey || feedUrl,
+        sourceType: 'rss',
+        lang: scheduledFeedConfig?.lang || ''
       }, normalizedItem, { cacheCurrent: false });
       return json({
         ok: !result.skipped && result.failed === 0,
@@ -904,19 +879,18 @@ export default {
       if (controller.cron === '0 */2 * * *') {
         await processQWeatherRainAlert(env);
       } else if (controller.cron === '10 0 * * *') {
-        const feeds = await getScheduledRssSources(env);
-        for (const feedConfig of feeds) {
+        for (const feedConfig of DEFAULT_RSS_SOURCES) {
           await refreshScheduledRssFeedState(env, feedConfig);
         }
       } else if (controller.cron === '30 0 * * *') {
-        const feeds = await getScheduledRssSources(env);
-        for (const feedConfig of feeds) {
-          const sourceKey = feedConfig.sourceKey || getRssSourceKey(feedConfig.feedUrl);
+        for (const feedConfig of DEFAULT_RSS_SOURCES) {
+          const sourceKey = feedConfig.sourceKey;
           const item = await getStateJson(env, getSourceCurrentKey(sourceKey));
           if (item) {
             await processSourceItem(env, {
               sourceKey,
-              sourceType: 'rss'
+              sourceType: 'rss',
+              lang: feedConfig.lang || ''
             }, item);
           }
         }
