@@ -49,10 +49,6 @@
             font-family: "LM Math";
         }
 
-        /* .article-text.zh {
-            font-family: "STZhongsong";
-        } */
-
         .no-image-header {
             display: grid;
             grid-template-columns: 10% 1fr;
@@ -133,7 +129,6 @@
                 border-color: #282a36;
             }
         }
-
 
     </style>
 </head>
@@ -243,7 +238,7 @@
         function appendBody(parent, item) {
             const articleText = document.createElement('div');
             articleText.className = 'article-text';
-            if (item.lang === 'zh') {
+            if (item.lang) {
                 articleText.style.fontFamily = "STZhongsong";
             }
             if (item.summaryHtml) {
