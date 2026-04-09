@@ -30,6 +30,7 @@ const FEED_XML_PARSER = new XMLParser({
   parseTagValue: false,
   parseAttributeValue: false,
   processEntities: false,
+  cdataPropName: '__cdata',
   stopNodes: ['*.summary', '*.content', '*.description']
 });
 const ALLOWED_SUMMARY_TAGS = new Set(['p', 'a', 'ul', 'ol', 'li', 'b', 'strong', 'i', 'em', 'abbr', 'small', 'sup', 'sub', 'br']);
@@ -408,7 +409,12 @@ function nodeHtml(value) {
     return value.map((item) => nodeHtml(item)).filter(Boolean).join('').trim();
   }
   if (isRecord(value)) {
-    return decodeXmlEntities(`${value['#text'] || ''}${value.__cdata || ''}`).trim();
+    if (typeof value.__cdata === 'string') {
+      return decodeXmlEntities(value.__cdata).trim();
+    }
+    if (typeof value['#text'] === 'string') {
+      return decodeXmlEntities(value['#text']).trim();
+    }
   }
   return '';
 }
@@ -682,6 +688,7 @@ async function processSourceItem(env, source, item, options = {}) {
     id: `${source.sourceKey}:${itemKey}`,
     sourceKey: source.sourceKey,
     lang: source.lang || '',
+    title: item.title || '',
     summaryHtml: item.summaryHtml || '',
     link: item.link || '',
     imageUrl: item.imageUrl || '',
