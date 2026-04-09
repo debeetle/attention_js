@@ -1,5 +1,6 @@
 import { setVapidDetails, sendNotification } from './pwanotify.js';
 import { buildQWeatherAuthorizationHeader } from './qweather-jwt.js';
+import { XMLParser } from 'fast-xml-parser';
 
 const SHANGHAI_TIME_ZONE = 'Asia/Shanghai';
 const HISTORY_KEY = 'history:items';
@@ -22,6 +23,17 @@ const DEFAULT_RSS_SOURCES = [
     lang: 'zh'
   }
 ];
+const FEED_XML_PARSER = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: '',
+  trimValues: false,
+  parseTagValue: false,
+  parseAttributeValue: false,
+  processEntities: false,
+  stopNodes: ['*.summary', '*.content', '*.description']
+});
+const ALLOWED_SUMMARY_TAGS = new Set(['p', 'a', 'ul', 'ol', 'li', 'b', 'strong', 'i', 'em', 'abbr', 'small', 'sup', 'sub', 'br']);
+const DROP_SUMMARY_TAGS = new Set(['script', 'style', 'link', 'img']);
 
 function base64ToUint8Array(b64) {
   const bin = atob(b64);
@@ -303,6 +315,104 @@ function cleanHistoryBodyText(text) {
   return `${cleaned}...`;
 }
 
+function isSentenceTerminator(text, index) {
+  const ch = text[index];
+  if (!/[.!?。！？]/.test(ch)) return false;
+
+  const prev = index > 0 ? text[index - 1] : '';
+  const next = index + 1 < text.length ? text[index + 1] : '';
+
+  if (ch === '.' && /\d/.test(prev) && /\d/.test(next)) {
+    return false;
+  }
+
+  return true;
+}
+
+function truncateSanitizedHtml(html, maxSentences) {
+  const source = html || '';
+  let output = '';
+  let sentenceCount = 0;
+  let insideTag = false;
+  const stack = [];
+
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i];
+    output += ch;
+
+    if (insideTag) {
+      if (ch === '>') {
+        insideTag = false;
+        const tagText = output.slice(output.lastIndexOf('<') + 1, output.length - 1).trim();
+        if (!tagText || tagText.startsWith('!') || tagText.startsWith('?')) continue;
+        if (tagText.startsWith('/')) {
+          const closingName = tagText.slice(1).split(/\s+/)[0].toLowerCase();
+          const idx = stack.lastIndexOf(closingName);
+          if (idx >= 0) stack.splice(idx, 1);
+          continue;
+        }
+        const selfClosing = tagText.endsWith('/');
+        const openingName = tagText.replace(/\/$/, '').split(/\s+/)[0].toLowerCase();
+        if (!selfClosing && openingName !== 'br') stack.push(openingName);
+      }
+      continue;
+    }
+
+    if (ch === '<') {
+      insideTag = true;
+      continue;
+    }
+
+    if (!isSentenceTerminator(source, i)) continue;
+    sentenceCount += 1;
+    if (sentenceCount < maxSentences) continue;
+
+    while (stack.length) {
+      output += `</${stack.pop()}>`;
+    }
+    return output.trim();
+  }
+
+  return source.trim();
+}
+
+function asArray(value) {
+  if (value == null) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+function isRecord(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function nodeText(value) {
+  if (value == null) return '';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return decodeXmlEntities(String(value)).trim();
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => nodeText(item)).filter(Boolean).join(' ').trim();
+  }
+  if (isRecord(value)) {
+    return decodeXmlEntities(`${value['#text'] || ''}${value.__cdata || ''}`).trim();
+  }
+  return '';
+}
+
+function nodeHtml(value) {
+  if (value == null) return '';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return decodeXmlEntities(String(value)).trim();
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => nodeHtml(item)).filter(Boolean).join('').trim();
+  }
+  if (isRecord(value)) {
+    return decodeXmlEntities(`${value['#text'] || ''}${value.__cdata || ''}`).trim();
+  }
+  return '';
+}
+
 function firstMatch(text, patterns) {
   for (const pattern of patterns) {
     const match = text.match(pattern);
@@ -336,54 +446,44 @@ function extractPrimaryImage(summaryHtml, baseUrl = '') {
   };
 }
 
-function parseFeedItemBlock(itemBlock, feedMeta) {
+function extractFeedLink(linkNode, baseUrl = '') {
+  for (const link of asArray(linkNode)) {
+    if (isRecord(link)) {
+      const href = nodeText(link.href);
+      const rel = nodeText(link.rel).toLowerCase();
+      if (href && (!rel || rel === 'alternate')) return toAbsoluteUrl(href, baseUrl);
+    } else {
+      const href = nodeText(link);
+      if (href) return toAbsoluteUrl(href, baseUrl);
+    }
+  }
+  return '';
+}
+
+async function parseFeedItemNode(itemNode, feedMeta) {
   const { baseUrl = '' } = feedMeta || {};
-  const title = stripTags(firstMatch(itemBlock, [
-    /<title[^>]*>([\s\S]*?)<\/title>/i
-  ]));
-  const link = toAbsoluteUrl(decodeXmlEntities(firstMatch(itemBlock, [
-    /<link>([\s\S]*?)<\/link>/i,
-    /<link[^>]*href=["']([^"']+)["'][^>]*\/?>(?:<\/link>)?/i,
-    /<guid[^>]*>(https?:[^<]+)<\/guid>/i,
-    /<id[^>]*>(https?:[^<]+)<\/id>/i
-  ])), baseUrl);
-  const itemId = decodeXmlEntities(firstMatch(itemBlock, [
-    /<id[^>]*>([\s\S]*?)<\/id>/i,
-    /<guid[^>]*>([\s\S]*?)<\/guid>/i,
-    /<link[^>]*href=["']([^"']+)["'][^>]*\/?>(?:<\/link>)?/i,
-    /<link>([\s\S]*?)<\/link>/i
-  ]));
-  const publishedAt = decodeXmlEntities(firstMatch(itemBlock, [
-    /<updated[^>]*>([\s\S]*?)<\/updated>/i,
-    /<published[^>]*>([\s\S]*?)<\/published>/i,
-    /<pubDate[^>]*>([\s\S]*?)<\/pubDate>/i
-  ]));
-  const decodedSummaryHtml = decodeXmlEntities(firstMatch(itemBlock, [
-    /<description[^>]*>([\s\S]*?)<\/description>/i,
-    /<content[^>]*>([\s\S]*?)<\/content>/i,
-    /<summary[^>]*>([\s\S]*?)<\/summary>/i
-  ]));
-  const description = truncateToSentence(stripTags(firstMatch(decodedSummaryHtml, [
-    /<p\b[^>]*>([\s\S]*?)<\/p>/i
-  ]) || decodedSummaryHtml), 180);
-  const { imageUrl, imageAlt } = extractPrimaryImage(decodedSummaryHtml, baseUrl || link);
-  const summaryHtml = sanitizeSummaryHtml(decodedSummaryHtml, description, baseUrl || link);
+  const title = stripTags(nodeText(itemNode.title));
+  const link = extractFeedLink(itemNode.link, baseUrl) || toAbsoluteUrl(nodeText(itemNode.link), baseUrl);
+  const itemId = nodeText(itemNode.id || itemNode.guid) || link;
+  const publishedAt = nodeText(itemNode.updated || itemNode.published || itemNode.pubDate);
+  const rawSummaryHtml = nodeHtml(itemNode.summary || itemNode.content || itemNode.description);
+  const description = truncateToSentence(stripTags(rawSummaryHtml), 180);
+  const { imageUrl, imageAlt } = extractPrimaryImage(rawSummaryHtml, baseUrl || link);
+  const summaryHtml = await sanitizeSummaryHtml(rawSummaryHtml, description, baseUrl || link);
 
   return { title, link, description, summaryText: description, summaryHtml, imageUrl, imageAlt, itemId, publishedAt };
 }
 
-function parseLatestFeedItem(feedText) {
+async function parseLatestFeedItem(feedText) {
+  const parsed = FEED_XML_PARSER.parse(feedText);
+  const feedRoot = parsed.feed || parsed.rss?.channel || null;
+  if (!feedRoot) return null;
+
   const feedMeta = {
-    baseUrl: decodeXmlEntities(firstMatch(feedText, [
-      /<link[^>]*rel=["']alternate["'][^>]*href=["']([^"']+)["'][^>]*\/?>/i,
-      /<link[^>]*href=["']([^"']+)["'][^>]*\/?>/i
-    ]))
+    baseUrl: extractFeedLink(feedRoot.link || feedRoot.atomLink, '')
   };
-  const parsedItems = [
-    ...Array.from(feedText.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)).map((match) => match[1]),
-    ...Array.from(feedText.matchAll(/<entry\b[^>]*>([\s\S]*?)<\/entry>/gi)).map((match) => match[1])
-  ]
-    .map((itemBlock) => parseFeedItemBlock(itemBlock, feedMeta))
+  const rawItems = feedRoot.entry || feedRoot.item || [];
+  const parsedItems = (await Promise.all(asArray(rawItems).map((itemNode) => parseFeedItemNode(itemNode, feedMeta))))
     .filter((item) => item && item.title);
 
   if (parsedItems.length === 0) return null;
@@ -396,18 +496,74 @@ function parseLatestFeedItem(feedText) {
   return parsedItems.at(-1);
 }
 
-function sanitizeSummaryHtml(summaryHtml, summaryText, baseUrl = '') {
+function sanitizeSummaryHref(href, baseUrl = '') {
+  const resolved = toAbsoluteUrl(href || '', baseUrl);
+  try {
+    const url = new URL(resolved);
+    if (url.protocol === 'http:' || url.protocol === 'https:') return url.toString();
+  } catch {
+  }
+  return '';
+}
+
+class SummaryElementSanitizer {
+  constructor(baseUrl) {
+    this.baseUrl = baseUrl;
+  }
+
+  element(element) {
+    const rawTag = typeof element.tagName === 'string' ? element.tagName : '';
+    if (!rawTag) return;
+    const tag = rawTag.toLowerCase();
+    if (tag === 'summary-root') return;
+    if (DROP_SUMMARY_TAGS.has(tag)) {
+      element.remove();
+      return;
+    }
+    if (!ALLOWED_SUMMARY_TAGS.has(tag)) {
+      element.removeAndKeepContent();
+      return;
+    }
+
+    for (const attr of Array.from(element.attributes || [])) {
+      const rawName = typeof attr?.name === 'string' ? attr.name : '';
+      if (!rawName) continue;
+      const name = rawName.toLowerCase();
+      if (tag === 'a' && name === 'href') continue;
+      element.removeAttribute(rawName);
+    }
+
+    if (tag === 'a') {
+      const href = sanitizeSummaryHref(element.getAttribute('href') || '', this.baseUrl);
+      if (href) {
+        element.setAttribute('href', href);
+      } else {
+        element.removeAndKeepContent();
+      }
+    }
+  }
+}
+
+class SummaryDocumentSanitizer {
+  comments(comment) {
+    comment.remove();
+  }
+}
+
+async function sanitizeSummaryHtml(summaryHtml, summaryText, baseUrl = '') {
   if (!summaryHtml) return summaryText ? `<p>${escapeHtml(summaryText)}</p>` : '';
-  const sanitized = normalizeMarkupNoise(summaryHtml)
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/\son[a-z-]+=(["']).*?\1/gi, '')
-    .replace(/\s(?:class|style|lang|dir|title|typeof|data-[^=]+)=["'][^"']*["']/gi, '')
-    .replace(/href=(["'])(\/[^"']*)\1/gi, (_, quote, path) => `href=${quote}${toAbsoluteUrl(path, baseUrl)}${quote}`)
-    .replace(/href=(["'])(\/\/[^"']*)\1/gi, 'href="https:$2"')
-    .replace(/src=(["'])(\/\/[^"']*)\1/gi, 'src="https:$2"')
-    .replace(/src=(["'])(\/[^"']*)\1/gi, (_, quote, path) => `src=${quote}${toAbsoluteUrl(path, baseUrl)}${quote}`)
-    .replace(/\s(?:target|download|srcset|sizes|loading|decoding)=["'][^"']*["']/gi, '')
-    .trim();
+  const wrapped = `<summary-root>${normalizeMarkupNoise(summaryHtml)}</summary-root>`;
+  const rewritten = await new HTMLRewriter()
+    .on('*', new SummaryElementSanitizer(baseUrl))
+    .onDocument(new SummaryDocumentSanitizer())
+    .transform(new Response(wrapped, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' }
+    }))
+    .text();
+  const sanitized = truncateSanitizedHtml(rewritten
+    .replace(/^<summary-root>/i, '')
+    .replace(/<\/summary-root>$/i, '')
+    .trim(), 3);
   return sanitized || (summaryText ? `<p>${escapeHtml(summaryText)}</p>` : '');
 }
 
@@ -485,7 +641,7 @@ async function refreshScheduledRssFeedState(env, feedConfig) {
     throw new Error(`Scheduled feed fetch failed: ${preview.status}`);
   }
 
-  const item = normalizeScheduledFeedItem(feedConfig, parseLatestFeedItem(preview.text));
+  const item = normalizeScheduledFeedItem(feedConfig, await parseLatestFeedItem(preview.text));
   if (!item) throw new Error('Unable to parse scheduled feed');
   item.date = (item.publishedAt || '').slice(0, 10);
 
@@ -597,7 +753,7 @@ async function sendToAllSubscriptions(env, payload) {
 
 async function handleWebSubDelivery(env, rawBody, fallbackUrl = '') {
   const text = new TextDecoder().decode(rawBody);
-  const item = parseLatestFeedItem(text);
+  const item = await parseLatestFeedItem(text);
   if (!item || !item.title) return { ok: false, reason: 'unable_to_parse_feed_item' };
   return processSourceItem(env, {
     sourceKey: fallbackUrl ? `websub:${fallbackUrl}` : 'websub:unknown',
@@ -664,13 +820,13 @@ export default {
         const createdAt = item && item.createdAt ? Date.parse(item.createdAt) : 0;
         return createdAt && (now - createdAt) <= HISTORY_RETENTION_MS;
       }).sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0));
-      const items = rawItems.map((item) => ({
+      const items = await Promise.all(rawItems.map(async (item) => ({
         ...item,
         summaryText: cleanHistoryBodyText(item.summaryText),
         summaryHtml: item.summaryHtml
-          ? sanitizeSummaryHtml(item.summaryHtml, cleanHistoryBodyText(item.summaryText))
+          ? await sanitizeSummaryHtml(item.summaryHtml, cleanHistoryBodyText(item.summaryText))
           : ''
-      }));
+      })));
       await putStateJson(env, HISTORY_KEY, rawItems);
       return json({
         ok: true,
@@ -853,7 +1009,7 @@ export default {
         return json({ ok: false, feedUrl, status: preview.status, error: 'Feed fetch failed' }, 502);
       }
 
-      const item = parseLatestFeedItem(preview.text);
+      const item = await parseLatestFeedItem(preview.text);
       if (!item || !item.title) return new Response('Unable to parse latest feed item', { status: 422 });
       const scheduledFeedConfig = getScheduledFeedConfig(feedUrl);
       const normalizedItem = normalizeScheduledFeedItem(scheduledFeedConfig, item);

@@ -1,0 +1,8 @@
+{
+  "name": "attention-js",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "fast-xml-parser": "^5.5.11"
+  }
+}

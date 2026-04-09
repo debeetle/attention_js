@@ -37,7 +37,7 @@
         .notification {
             margin: 1rem 0 1rem 0;
             padding: 8px;
-            border: 2px solid #888;
+            border: 2px solid currentColor;
             border-radius: 15px;
         }
         
@@ -83,7 +83,7 @@
             position: relative;
             overflow: hidden;
             border-radius: 7px;
-            border: 1px solid #eee;
+            border: 1px solid currentColor;
         }
 
         .picture-overlay {
@@ -122,13 +122,13 @@
         /* wiki onthisday end */
 
         @media (prefers-color-scheme: dark) {
-            .notification {
+            /* .notification {
                 border-color: #5a5a5a;
-            }
-            .picture-wrap {
+            } */
+            /* .picture-wrap {
                 border-color: #282a36;
             }
-        }
+        } */
 
     </style>
 </head>
@@ -146,9 +146,11 @@
             root.replaceChildren();
             if (!payload || !payload.ok || !Array.isArray(payload.items)) return;
 
+            const fragment = document.createDocumentFragment();
             for (const [index, item] of payload.items.entries()) {
-                root.appendChild(buildNotification(item, index));
+                fragment.appendChild(buildNotification(item, index));
             }
+            root.appendChild(fragment);
         }
 
         function buildNotification(item, index) {
@@ -242,104 +244,10 @@
                 articleText.style.fontFamily = "STZhongsong";
             }
             if (item.summaryHtml) {
-                articleText.innerHTML = normalizeBodyHtml(truncateHtmlToSentences(item.summaryHtml, 3));
+                articleText.innerHTML = item.summaryHtml;
             }
 
             parent.appendChild(articleText);
-        }
-
-        function unwrapElement(element) {
-            const parent = element.parentNode;
-            if (!parent) return;
-            while (element.firstChild) {
-                parent.insertBefore(element.firstChild, element);
-            }
-            element.remove();
-        }
-
-        function normalizeBodyHtml(html) {
-            if (!html) return '';
-            const template = document.createElement('template');
-            template.innerHTML = html;
-
-            for (const image of Array.from(template.content.querySelectorAll('img'))) {
-                image.remove();
-            }
-
-            for (const media of Array.from(template.content.querySelectorAll('#mp-otd-img'))) {
-                media.remove();
-            }
-
-            for (const cell of Array.from(template.content.querySelectorAll('table, tbody, tr, td'))) {
-                unwrapElement(cell);
-            }
-
-            for (const empty of Array.from(template.content.querySelectorAll('div, span, p'))) {
-                if (empty.children.length === 0 && !empty.textContent.trim()) {
-                    empty.remove();
-                }
-            }
-
-            return template.innerHTML.trim();
-        }
-
-        function truncateHtmlToSentences(html, maxSentences) {
-            const template = document.createElement('template');
-            template.innerHTML = html || '';
-            let sentenceCount = 0;
-            let truncated = false;
-
-            function trimNode(node) {
-                if (truncated) {
-                    node.remove();
-                    return;
-                }
-
-                if (node.nodeType === Node.TEXT_NODE) {
-                    const text = node.textContent || '';
-                    for (let i = 0; i < text.length; i++) {
-                        if (!isSentenceTerminator(text, i)) continue;
-                        sentenceCount += 1;
-                        if (sentenceCount >= maxSentences) {
-                            node.textContent = text.slice(0, i + 1);
-                            truncated = true;
-                            return;
-                        }
-                    }
-                    return;
-                }
-
-                const children = Array.from(node.childNodes);
-                for (const child of children) {
-                    trimNode(child);
-                    if (truncated) {
-                        let sibling = child.nextSibling;
-                        while (sibling) {
-                            const next = sibling.nextSibling;
-                            sibling.remove();
-                            sibling = next;
-                        }
-                        return;
-                    }
-                }
-            }
-
-            trimNode(template.content);
-            return template.innerHTML.trim();
-        }
-
-        function isSentenceTerminator(text, index) {
-            const ch = text[index];
-            if (!/[.!?。！？]/.test(ch)) return false;
-
-            const prev = index > 0 ? text[index - 1] : '';
-            const next = index + 1 < text.length ? text[index + 1] : '';
-
-            if (ch === '.' && /\d/.test(prev) && /\d/.test(next)) {
-                return false;
-            }
-
-            return true;
         }
 
         function faviconFor(link) {
