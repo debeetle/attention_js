@@ -14,6 +14,7 @@
     <style>
         #permission-grant {
             display: none;
+            font-size: 1rem;
         }
         @font-face {
             font-family: 'SCP';
@@ -36,7 +37,7 @@
 
         .notification {
             margin: 1rem 0 1rem 0;
-            padding: 8px;
+            padding: 12px;
             border: 2px solid;
             border-color: rgb(from currentColor r g b / 60%);
             border-radius: 18px;
@@ -75,15 +76,15 @@
         /* Big image*/
         .picture {
             display: block;
-            max-width: 100%;
-            height: auto;
             width: 100%;
+            max-height: 22rem;
+            object-fit: cover;
         }
 
         .picture-wrap {
             position: relative;
             overflow: hidden;
-            border-radius: 10px;
+            border-radius: 6px;
             border: 1px solid;
             border-color: rgb(from currentColor r g b / 20%);
         }
@@ -136,23 +137,103 @@
 </head>
 
 <body>
-    <button id="permission-grant">Enable Notifications</button>
+    <button id="permission-grant">Register</button>
     <section id="history"></section>
 
     <script>
+        const HISTORY_DB_NAME = 'attention-history';
+        const HISTORY_DB_VERSION = 1;
+        const HISTORY_STORE_NAME = 'articles';
+        const HISTORY_RENDER_LIMIT = 50;
         let hasSubscribed = false;
         let PUBLIC_VAPID_KEY = '';
 
-        function renderHistory(payload) {
+        function transactionDone(transaction) {
+            return new Promise((resolve, reject) => {
+                transaction.oncomplete = () => resolve();
+                transaction.onerror = () => reject(transaction.error || new Error('IndexedDB transaction failed'));
+                transaction.onabort = () => reject(transaction.error || new Error('IndexedDB transaction aborted'));
+            });
+        }
+
+        function openHistoryDb() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(HISTORY_DB_NAME, HISTORY_DB_VERSION);
+                request.onupgradeneeded = () => {
+                    const db = request.result;
+                    const store = db.objectStoreNames.contains(HISTORY_STORE_NAME)
+                        ? request.transaction.objectStore(HISTORY_STORE_NAME)
+                        : db.createObjectStore(HISTORY_STORE_NAME, { keyPath: 'id' });
+
+                    if (!store.indexNames.contains('createdAt')) {
+                        store.createIndex('createdAt', 'createdAt');
+                    }
+                    if (!store.indexNames.contains('publishedAt')) {
+                        store.createIndex('publishedAt', 'publishedAt');
+                    }
+                    if (!store.indexNames.contains('sourceKey')) {
+                        store.createIndex('sourceKey', 'sourceKey');
+                    }
+                };
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error || new Error('Unable to open IndexedDB'));
+            });
+        }
+
+        async function readHistoryFromDb(limit = HISTORY_RENDER_LIMIT) {
+            const db = await openHistoryDb();
+            try {
+                const transaction = db.transaction(HISTORY_STORE_NAME, 'readonly');
+                const index = transaction.objectStore(HISTORY_STORE_NAME).index('createdAt');
+                const items = [];
+                await new Promise((resolve, reject) => {
+                    const request = index.openCursor(null, 'prev');
+                    request.onsuccess = () => {
+                        const cursor = request.result;
+                        if (!cursor || items.length >= limit) {
+                            resolve();
+                            return;
+                        }
+                        items.push(cursor.value);
+                        cursor.continue();
+                    };
+                    request.onerror = () => reject(request.error || new Error('Unable to read local history'));
+                });
+                return items;
+            } finally {
+                db.close();
+            }
+        }
+
+        async function replaceHistoryInDb(items) {
+            const db = await openHistoryDb();
+            try {
+                const transaction = db.transaction(HISTORY_STORE_NAME, 'readwrite');
+                const store = transaction.objectStore(HISTORY_STORE_NAME);
+                store.clear();
+                for (const item of items) {
+                    store.put(item);
+                }
+                await transactionDone(transaction);
+            } finally {
+                db.close();
+            }
+        }
+
+        function renderHistory(items) {
             const root = document.getElementById('history');
             root.replaceChildren();
-            if (!payload || !payload.ok || !Array.isArray(payload.items)) return;
+            if (!Array.isArray(items)) return;
 
             const fragment = document.createDocumentFragment();
-            for (const [index, item] of payload.items.entries()) {
+            for (const [index, item] of items.entries()) {
                 fragment.appendChild(buildNotification(item, index));
             }
             root.appendChild(fragment);
+        }
+
+        function isWikipediaSource(item) {
+            return (item.sourceKey || '').toLowerCase().startsWith('wiki');
         }
 
         function buildNotification(item, index) {
@@ -188,7 +269,7 @@
                     overlay.appendChild(title);
                 }
 
-                if (item.sourceKey === 'WikiPOTD' || item.sourceKey === 'WikiOnThisDay') {
+                if (isWikipediaSource(item)) {
                     const logo = document.createElement('img');
                     logo.className = 'picture-source-logo';
                     logo.src = '/figure/Wikipedia-logo-v2.svg';
@@ -210,14 +291,17 @@
             header.className = 'no-image-header';
 
             const logo = document.createElement('div');
-            const favicon = document.createElement('img');
-            favicon.className = 'favicon';
-            favicon.src = sourceIconFor(item);
-            favicon.alt = item.sourceKey || '';
-            favicon.decoding = 'async';
-            favicon.loading = 'lazy';
-            favicon.fetchPriority = 'low';
-            logo.appendChild(favicon);
+            const iconSrc = sourceIconFor(item);
+            if (iconSrc) {
+                const favicon = document.createElement('img');
+                favicon.className = 'favicon';
+                favicon.src = iconSrc;
+                favicon.alt = item.sourceKey || '';
+                favicon.decoding = 'async';
+                favicon.loading = 'lazy';
+                favicon.fetchPriority = 'low';
+                logo.appendChild(favicon);
+            }
             header.appendChild(logo);
 
             const title = document.createElement('div');
@@ -252,21 +336,11 @@
             parent.appendChild(articleText);
         }
 
-        function faviconFor(link) {
-            try {
-                if (!link) return '/icon.png';
-                const url = new URL(link);
-                return `${url.origin}/favicon.ico`;
-            } catch {
-                return '/icon.png';
-            }
-        }
-
         function sourceIconFor(item) {
-            if ((item.sourceKey || '').startsWith('Wiki')) {
+            if (isWikipediaSource(item)) {
                 return '/figure/Wikipedia-logo-v2.svg';
             }
-            return faviconFor(item.link);
+            return '';
         }
 
         function elapsedHoursText(value) {
@@ -276,11 +350,21 @@
             return `${hours} ${hours === 1 ? 'hour' : 'hours'}`;
         }
 
-        async function loadHistory() {
+        async function renderLocalHistory() {
+            try {
+                renderHistory(await readHistoryFromDb());
+            } catch {
+            }
+        }
+
+        async function syncHistory() {
             try {
                 const res = await fetch('/history', { cache: 'no-store' });
                 if (!res.ok) return;
-                renderHistory(await res.json());
+                const payload = await res.json();
+                if (!payload || !payload.ok || !Array.isArray(payload.items)) return;
+                await replaceHistoryInDb(payload.items);
+                renderHistory(payload.items);
             } catch {
             }
         }
@@ -331,7 +415,8 @@
 
         window.addEventListener('load', async () => {
             const button = document.getElementById('permission-grant');
-            loadHistory();
+            renderLocalHistory();
+            syncHistory();
 
             try {
                 const res = await fetch('/config', { cache: 'no-store' });

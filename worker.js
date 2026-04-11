@@ -9,16 +9,16 @@ const HISTORY_RETENTION_MS = 3 * 24 * 60 * 60 * 1000;
 const QWEATHER_API_HOST = 'mh7mdaq86q.re.qweatherapi.com';
 const DEFAULT_RSS_SOURCES = [
   {
-    sourceKey: 'WikiPOTD',
+    sourceKey: 'wiki picture of today',
     feedUrl: 'https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=potd&feedformat=atom'
   },
   {
-    sourceKey: 'WikiOnThisDay',
+    sourceKey: 'wiki on this day',
     feedUrl: 'https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=onthisday&feedformat=atom',
     imageWidth: 250
   },
   {
-    sourceKey: 'WikiDYK',
+    sourceKey: 'wiki do you know',
     feedUrl: 'https://zh.wikipedia.org/w/api.php?action=featuredfeed&feed=dyk&feedformat=atom',
     lang: 'zh'
   }
@@ -33,7 +33,7 @@ const FEED_XML_PARSER = new XMLParser({
   cdataPropName: '__cdata',
   stopNodes: ['*.summary', '*.content', '*.description']
 });
-const ALLOWED_SUMMARY_TAGS = new Set(['p', 'a', 'ul', 'ol', 'li', 'b', 'strong', 'i', 'em', 'abbr', 'small', 'sup', 'sub', 'br']);
+const BASE_ALLOWED_SUMMARY_TAGS = new Set(['p', 'a', 'strong', 'i', 'em', 'abbr', 'small', 'sup', 'sub', 'br']);
 const DROP_SUMMARY_TAGS = new Set(['script', 'style', 'link', 'img']);
 
 function base64ToUint8Array(b64) {
@@ -467,7 +467,7 @@ function extractFeedLink(linkNode, baseUrl = '') {
 }
 
 async function parseFeedItemNode(itemNode, feedMeta) {
-  const { baseUrl = '' } = feedMeta || {};
+  const { baseUrl = '', source = null } = feedMeta || {};
   const title = stripTags(nodeText(itemNode.title));
   const link = extractFeedLink(itemNode.link, baseUrl) || toAbsoluteUrl(nodeText(itemNode.link), baseUrl);
   const itemId = nodeText(itemNode.id || itemNode.guid) || link;
@@ -475,18 +475,19 @@ async function parseFeedItemNode(itemNode, feedMeta) {
   const rawSummaryHtml = nodeHtml(itemNode.summary || itemNode.content || itemNode.description);
   const description = truncateToSentence(stripTags(rawSummaryHtml), 180);
   const { imageUrl, imageAlt } = extractPrimaryImage(rawSummaryHtml, baseUrl || link);
-  const summaryHtml = await sanitizeSummaryHtml(rawSummaryHtml, description, baseUrl || link);
+  const summaryHtml = await sanitizeSummaryHtml(rawSummaryHtml, description, baseUrl || link, source);
 
   return { title, link, description, summaryText: description, summaryHtml, imageUrl, imageAlt, itemId, publishedAt };
 }
 
-async function parseLatestFeedItem(feedText) {
+async function parseLatestFeedItem(feedText, source = null) {
   const parsed = FEED_XML_PARSER.parse(feedText);
   const feedRoot = parsed.feed || parsed.rss?.channel || null;
   if (!feedRoot) return null;
 
   const feedMeta = {
-    baseUrl: extractFeedLink(feedRoot.link || feedRoot.atomLink, '')
+    baseUrl: extractFeedLink(feedRoot.link || feedRoot.atomLink, ''),
+    source
   };
   const rawItems = feedRoot.entry || feedRoot.item || [];
   const parsedItems = (await Promise.all(asArray(rawItems).map((itemNode) => parseFeedItemNode(itemNode, feedMeta))))
@@ -513,8 +514,16 @@ function sanitizeSummaryHref(href, baseUrl = '') {
 }
 
 class SummaryElementSanitizer {
-  constructor(baseUrl) {
+  constructor(baseUrl, source = null) {
     this.baseUrl = baseUrl;
+    this.allowedTags = new Set(BASE_ALLOWED_SUMMARY_TAGS);
+    if (!source || source.lang !== 'zh') {
+      this.allowedTags.add('b');
+    }
+    if (source?.sourceKey === 'wiki do you know') {
+      this.allowedTags.add('ul');
+      this.allowedTags.add('li');
+    }
   }
 
   element(element) {
@@ -526,7 +535,7 @@ class SummaryElementSanitizer {
       element.remove();
       return;
     }
-    if (!ALLOWED_SUMMARY_TAGS.has(tag)) {
+    if (!this.allowedTags.has(tag)) {
       element.removeAndKeepContent();
       return;
     }
@@ -556,11 +565,11 @@ class SummaryDocumentSanitizer {
   }
 }
 
-async function sanitizeSummaryHtml(summaryHtml, summaryText, baseUrl = '') {
+async function sanitizeSummaryHtml(summaryHtml, summaryText, baseUrl = '', source = null) {
   if (!summaryHtml) return summaryText ? `<p>${escapeHtml(summaryText)}</p>` : '';
   const wrapped = `<summary-root>${normalizeMarkupNoise(summaryHtml)}</summary-root>`;
   const rewritten = await new HTMLRewriter()
-    .on('*', new SummaryElementSanitizer(baseUrl))
+    .on('*', new SummaryElementSanitizer(baseUrl, source))
     .onDocument(new SummaryDocumentSanitizer())
     .transform(new Response(wrapped, {
       headers: { 'Content-Type': 'text/html; charset=utf-8' }
@@ -647,7 +656,7 @@ async function refreshScheduledRssFeedState(env, feedConfig) {
     throw new Error(`Scheduled feed fetch failed: ${preview.status}`);
   }
 
-  const item = normalizeScheduledFeedItem(feedConfig, await parseLatestFeedItem(preview.text));
+  const item = normalizeScheduledFeedItem(feedConfig, await parseLatestFeedItem(preview.text, feedConfig));
   if (!item) throw new Error('Unable to parse scheduled feed');
   item.date = (item.publishedAt || '').slice(0, 10);
 
@@ -760,12 +769,13 @@ async function sendToAllSubscriptions(env, payload) {
 
 async function handleWebSubDelivery(env, rawBody, fallbackUrl = '') {
   const text = new TextDecoder().decode(rawBody);
-  const item = await parseLatestFeedItem(text);
-  if (!item || !item.title) return { ok: false, reason: 'unable_to_parse_feed_item' };
-  return processSourceItem(env, {
+  const source = {
     sourceKey: fallbackUrl ? `websub:${fallbackUrl}` : 'websub:unknown',
     sourceType: 'websub'
-  }, item, { cacheCurrent: false });
+  };
+  const item = await parseLatestFeedItem(text, source);
+  if (!item || !item.title) return { ok: false, reason: 'unable_to_parse_feed_item' };
+  return processSourceItem(env, source, item, { cacheCurrent: false });
 }
 
 async function handleWebhookDelivery(env, rawBody, contentType = '') {
@@ -831,7 +841,7 @@ export default {
         ...item,
         summaryText: cleanHistoryBodyText(item.summaryText),
         summaryHtml: item.summaryHtml
-          ? await sanitizeSummaryHtml(item.summaryHtml, cleanHistoryBodyText(item.summaryText))
+          ? await sanitizeSummaryHtml(item.summaryHtml, cleanHistoryBodyText(item.summaryText), '', item)
           : ''
       })));
       await putStateJson(env, HISTORY_KEY, rawItems);
@@ -1016,9 +1026,9 @@ export default {
         return json({ ok: false, feedUrl, status: preview.status, error: 'Feed fetch failed' }, 502);
       }
 
-      const item = await parseLatestFeedItem(preview.text);
-      if (!item || !item.title) return new Response('Unable to parse latest feed item', { status: 422 });
       const scheduledFeedConfig = getScheduledFeedConfig(feedUrl);
+      const item = await parseLatestFeedItem(preview.text, scheduledFeedConfig);
+      if (!item || !item.title) return new Response('Unable to parse latest feed item', { status: 422 });
       const normalizedItem = normalizeScheduledFeedItem(scheduledFeedConfig, item);
       const result = await processSourceItem(env, {
         sourceKey: scheduledFeedConfig?.sourceKey || feedUrl,
