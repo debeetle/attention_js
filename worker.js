@@ -33,7 +33,7 @@ const FEED_XML_PARSER = new XMLParser({
   cdataPropName: '__cdata',
   stopNodes: ['*.summary', '*.content', '*.description']
 });
-const BASE_ALLOWED_SUMMARY_TAGS = new Set(['p', 'a', 'strong', 'i', 'em', 'abbr', 'small', 'sup', 'sub', 'br']);
+const BASE_ALLOWED_SUMMARY_TAGS = new Set(['p', 'a', 'ul', 'li', 'strong', 'i', 'em', 'abbr', 'small', 'sup', 'sub', 'br']);
 const DROP_SUMMARY_TAGS = new Set(['script', 'style', 'link', 'img']);
 
 function base64ToUint8Array(b64) {
@@ -519,10 +519,6 @@ class SummaryElementSanitizer {
     this.allowedTags = new Set(BASE_ALLOWED_SUMMARY_TAGS);
     if (!source || source.lang !== 'zh') {
       this.allowedTags.add('b');
-    }
-    if (source?.sourceKey === 'wiki do you know') {
-      this.allowedTags.add('ul');
-      this.allowedTags.add('li');
     }
   }
 
