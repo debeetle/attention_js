@@ -1,0 +1,20 @@
+# Copy this file to .dev.vars only if you want to run wrangler dev in local mode.
+# For the closest match to production, use `npm run dev` (remote mode), which reads the live Cloudflare KV and Worker environment.
+# If you do want local mode, the values must match the Cloudflare Worker secrets used by the deployed Worker.
+
+QWEATHER_PRIVATE_KEY=""
+SEND_API_KEY=""
+SUBS_ENC_KEY=""
+VAPID_PRIVATE_KEY=""
+
+# Optional local overrides for flows that use these integrations.
+# ALLOWED_ORIGINS="http://localhost:8787"
+# VAPID_SUBJECT="mailto:nobody@example.com"
+# WEBSUB_VERIFY_TOKEN=""
+# WEBSUB_SECRET=""
+# WEBSUB_HUB_URL=""
+# WEBSUB_TOPIC=""
+# WEBSUB_CALLBACK_URL=""
+# WEBSUB_LEASE_SECONDS="864000"
+# WEBHOOK_SECRET=""
+# POLL_URL=""

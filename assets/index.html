@@ -4,7 +4,6 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Attention</title>
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="icon" type="image/png" href="/figure/icon.png">
     <link rel="apple-touch-icon" href="/figure/icon.png">
@@ -14,7 +13,13 @@
     <style>
         #permission-grant {
             display: none;
-            font-size: 1rem;
+            font-family: sans-serif;
+            margin: 0;
+            padding: 0.5rem;
+            width: 100%;
+            box-sizing: border-box;
+            text-align: center;
+            background-color: purple;
         }
         @font-face {
             font-family: 'SCP';
@@ -35,6 +40,11 @@
             scrollbar-width: none;
         }
 
+        html::-webkit-scrollbar,
+        body::-webkit-scrollbar {
+            display: none;
+        }
+
         .notification {
             margin: 1rem 0 1rem 0;
             padding: 12px;
@@ -53,8 +63,7 @@
 
         .no-image-header {
             display: grid;
-            grid-template-columns: 10% 1fr;
-            font-family: "STZhongsong";
+            grid-template-columns: 1.5rem 1fr;
         }
 
         .favicon {
@@ -83,8 +92,8 @@
 
         .picture-wrap {
             position: relative;
-            overflow: hidden;
             border-radius: 6px;
+            overflow: hidden;            
             border: 1px solid;
             border-color: rgb(from currentColor r g b / 20%);
         }
@@ -102,9 +111,9 @@
             justify-content: space-between;
             align-items: center;
             gap: 0.75rem;
-            background: rgba(28, 24, 20, 0.2);
-            -webkit-backdrop-filter: blur(1rem);
-            backdrop-filter: blur(1rem);
+            background: rgba(28, 24, 20, 0.05);
+            -webkit-backdrop-filter: blur(0.2rem);
+            backdrop-filter: blur(0.2rem);
         }
 
         .picture-source-logo {
@@ -114,13 +123,40 @@
             /* flex: 0 0 auto; */
         }
 
+        .on-this-day-paired {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 0.5rem;
+            /* align-items: center; */
+            /* margin-bottom: 0.75rem; */
+        }
+
+        .annotated-picture {
+            display: block;
+            width: auto;
+            height: 12rem;
+            /* max-width: 45vw; */
+            /* object-fit: cover; */
+            border-radius: 6px;            
+            border: 1px solid;
+            border-color: rgb(from currentColor r g b / 20%);
+        }
+
+        .on-this-day-heading {
+            margin-top: 0;
+        }
+
         /* wiki potd end */
 
         /* wiki onthisday start */
         ul {
             margin-top: 0;
+            margin-bottom: 0;
             /* list-style-type: none; */
             padding-left: 1rem;
+        }
+        li::marker {
+            font-family: "LM Math";
         }
         /* wiki onthisday end */
 
@@ -137,8 +173,8 @@
 </head>
 
 <body>
-    <button id="permission-grant">Register</button>
-    <section id="history"></section>
+    <div id="permission-grant">register</div>
+    <div id="history"></div>
 
     <script>
         const HISTORY_DB_NAME = 'attention-history';
@@ -233,12 +269,41 @@
         }
 
         function isWikipediaSource(item) {
-            return (item.sourceKey || '').toLowerCase().startsWith('wiki');
+            return ['picture of today', 'on this day', 'do you know'].includes((item.sourceKey || '').toLowerCase());
+        }
+
+        function isOnThisDaySource(item) {
+            return (item.sourceKey || '').toLowerCase() === 'on this day';
+        }
+
+        function appendSourceHeader(parent, item) {
+            const header = document.createElement('div');
+            header.className = 'no-image-header';
+
+            const logo = document.createElement('div');
+            const iconSrc = sourceIconFor(item);
+            if (iconSrc) {
+                const favicon = document.createElement('img');
+                favicon.className = 'favicon';
+                favicon.src = iconSrc;
+                favicon.alt = item.sourceKey || '';
+                favicon.decoding = 'async';
+                favicon.loading = 'lazy';
+                favicon.fetchPriority = 'low';
+                logo.appendChild(favicon);
+            }
+            header.appendChild(logo);
+
+            const title = document.createElement('div');
+            title.style.paddingLeft = "1rem";
+            title.textContent = item.title || '';
+            header.appendChild(title);
+            parent.appendChild(header);
         }
 
         function buildNotification(item, index) {
             const notification = document.createElement('article');
-            notification.className = `notification${item.imageUrl ? '' : ' no-image'}`;
+            notification.className = 'notification';
 
             if (item.link) {
                 notification.addEventListener('click', () => {
@@ -246,7 +311,7 @@
                 });
             }
 
-            if (item.imageUrl) {
+            if (item.imageUrl && !isOnThisDaySource(item)) {
                 const pictureWrap = document.createElement('div');
                 pictureWrap.className = 'picture-wrap';
 
@@ -287,29 +352,13 @@
                 return notification;
             }
 
-            const header = document.createElement('div');
-            header.className = 'no-image-header';
-
-            const logo = document.createElement('div');
-            const iconSrc = sourceIconFor(item);
-            if (iconSrc) {
-                const favicon = document.createElement('img');
-                favicon.className = 'favicon';
-                favicon.src = iconSrc;
-                favicon.alt = item.sourceKey || '';
-                favicon.decoding = 'async';
-                favicon.loading = 'lazy';
-                favicon.fetchPriority = 'low';
-                logo.appendChild(favicon);
+            if (isOnThisDaySource(item)) {
+                appendOnThisDayBody(notification, item);
+                appendMetaRow(notification, item);
+                return notification;
             }
-            header.appendChild(logo);
 
-            const title = document.createElement('div');
-            title.style.paddingLeft = "1rem";
-            title.textContent = item.title || '';
-            header.appendChild(title);
-
-            notification.appendChild(header);
+            appendSourceHeader(notification, item);
             appendBody(notification, item);
             appendMetaRow(notification, item);
             return notification;
@@ -324,6 +373,11 @@
         }
 
         function appendBody(parent, item) {
+            if (isOnThisDaySource(item)) {
+                appendOnThisDayBody(parent, item);
+                return;
+            }
+
             const articleText = document.createElement('div');
             articleText.className = 'article-text';
             if (item.lang) {
@@ -334,6 +388,119 @@
             }
 
             parent.appendChild(articleText);
+        }
+
+        function appendOnThisDayBody(parent, item) {
+            const articleText = document.createElement('div');
+            articleText.className = 'article-text';
+
+            const template = document.createElement('template');
+            template.innerHTML = item.summaryHtml || '';
+
+            const heading = template.content.querySelector('p');
+            const allEntries = Array.from(template.content.querySelectorAll('li'));
+
+            if (heading || isWikipediaSource(item)) {
+                const header = document.createElement('div');
+                header.className = 'no-image-header';
+
+                const logoWrap = document.createElement('div');
+                if (isWikipediaSource(item)) {
+                    const logo = document.createElement('img');
+                    logo.className = 'favicon';
+                    logo.src = '/figure/Wikipedia-logo-v2.svg';
+                    logo.alt = 'Wikipedia';
+                    logo.decoding = 'async';
+                    logo.loading = 'lazy';
+                    logo.fetchPriority = 'low';
+                    logoWrap.appendChild(logo);
+                }
+                header.appendChild(logoWrap);
+
+                const headingWrap = document.createElement('div');
+                headingWrap.style.paddingLeft = '1rem';
+                if (heading) {
+                    const headingNode = heading.cloneNode(true);
+                    headingNode.classList.add('on-this-day-heading');
+                    headingWrap.appendChild(headingNode);
+                }
+                header.appendChild(headingWrap);
+
+                articleText.appendChild(header);
+            }
+
+            if (allEntries.length) {
+                const entries = selectOnThisDayEntries(allEntries, findPicturedIndex(allEntries));
+                const list = document.createElement('ul');
+                for (const entry of entries) {
+                    list.appendChild(buildOnThisDayEntry(entry, item));
+                }
+                articleText.appendChild(list);
+            }
+
+            if (!heading && !allEntries.length && item.summaryHtml) {
+                articleText.innerHTML = item.summaryHtml;
+            }
+
+            parent.appendChild(articleText);
+        }
+
+        function findPicturedIndex(entries) {
+            return entries.findIndex((entry) => /\((pictured|depicted)\)/i.test(entry.textContent || ''));
+        }
+
+        function selectOnThisDayEntries(entries, picturedIndex) {
+            if (picturedIndex >= 0 && picturedIndex > 2) {
+                const indexes = [0, 1, picturedIndex];
+                return indexes.filter((i) => i < entries.length).map((i) => entries[i]);
+            }
+            return entries.slice(0, 3);
+        }
+
+        function buildOnThisDayEntry(entry, item) {
+            const cleanEntry = entry.cloneNode(true);
+            cleanEntry.querySelectorAll('img, .annotated-picture, .on-this-day-paired-image').forEach((node) => node.remove());
+            cleanEntry.querySelectorAll('.on-this-day-paired, .on-this-day-paired-text').forEach(unwrapElement);
+
+            const li = document.createElement('li');
+            if (/\((pictured|depicted)\)/i.test(cleanEntry.textContent || '') && item.imageUrl) {
+                const row = document.createElement('div');
+                row.className = 'on-this-day-paired';
+
+                const text = document.createElement('div');
+                text.className = 'article-text';
+                moveChildren(cleanEntry, text);
+
+                const image = document.createElement('img');
+                image.className = 'annotated-picture';
+                image.src = item.imageUrl;
+                image.alt = '';
+                image.decoding = 'async';
+                image.loading = 'lazy';
+                image.fetchPriority = 'low';
+
+                row.append(text, image);
+                li.appendChild(row);
+                return li;
+            }
+
+            moveChildren(cleanEntry, li);
+            return li;
+        }
+
+        function moveChildren(from, to) {
+            while (from.firstChild) {
+                to.appendChild(from.firstChild);
+            }
+        }
+
+        function unwrapElement(element) {
+            const parent = element.parentNode;
+            if (!parent) return;
+            while (element.firstChild) {
+                parent.insertBefore(element.firstChild, element);
+            }
+            parent.removeChild(element);
         }
 
         function sourceIconFor(item) {
@@ -347,7 +514,8 @@
             const publishedAt = Date.parse(value || '');
             if (!Number.isFinite(publishedAt)) return '';
             const hours = Math.max(0, Math.floor((Date.now() - publishedAt) / (60 * 60 * 1000)));
-            return `${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+            return `${hours}h`;
+            // return `${hours} ${hours === 1 ? 'hour' : 'hours'}`;
         }
 
         async function renderLocalHistory() {

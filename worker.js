@@ -9,16 +9,16 @@ const HISTORY_RETENTION_MS = 3 * 24 * 60 * 60 * 1000;
 const QWEATHER_API_HOST = 'mh7mdaq86q.re.qweatherapi.com';
 const DEFAULT_RSS_SOURCES = [
   {
-    sourceKey: 'wiki picture of today',
+    sourceKey: 'picture of today',
     feedUrl: 'https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=potd&feedformat=atom'
   },
   {
-    sourceKey: 'wiki on this day',
+    sourceKey: 'on this day',
     feedUrl: 'https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=onthisday&feedformat=atom',
     imageWidth: 250
   },
   {
-    sourceKey: 'wiki do you know',
+    sourceKey: 'do you know',
     feedUrl: 'https://zh.wikipedia.org/w/api.php?action=featuredfeed&feed=dyk&feedformat=atom',
     lang: 'zh'
   }
@@ -291,6 +291,10 @@ function stripTags(str) {
   ).trim();
 }
 
+function isOnThisDaySource(source) {
+  return (source?.sourceKey || '') === 'on this day';
+}
+
 function truncateToSentence(text, maxLength = 180) {
   const normalized = (text || '').replace(/\s+/g, ' ').trim();
   if (!normalized || normalized.length <= maxLength) return normalized;
@@ -310,10 +314,22 @@ function truncateToSentence(text, maxLength = 180) {
 }
 
 function cleanHistoryBodyText(text) {
-  const cleaned = normalizeMarkupNoise((text || '').replace(/\s+/g, ' ')).trim();
+  const cleaned = normalizeNotificationText(
+    normalizeMarkupNoise((text || '').replace(/\s+/g, ' ')).trim()
+  );
   if (!cleaned) return '';
   if (/[.!?。！？…]$/.test(cleaned)) return cleaned;
   return `${cleaned}...`;
+}
+
+function normalizeNotificationText(text) {
+  return (text || '')
+    .replace(/["“”]/g, '')
+    .replace(/\s+([,.;:!?])/g, '$1')
+    .replace(/\(\s+/g, '(')
+    .replace(/\s+\)/g, ')')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function isSentenceTerminator(text, index) {
@@ -517,9 +533,6 @@ class SummaryElementSanitizer {
   constructor(baseUrl, source = null) {
     this.baseUrl = baseUrl;
     this.allowedTags = new Set(BASE_ALLOWED_SUMMARY_TAGS);
-    if (!source || source.lang !== 'zh') {
-      this.allowedTags.add('b');
-    }
   }
 
   element(element) {
@@ -571,21 +584,36 @@ async function sanitizeSummaryHtml(summaryHtml, summaryText, baseUrl = '', sourc
       headers: { 'Content-Type': 'text/html; charset=utf-8' }
     }))
     .text();
-  const sanitized = truncateSanitizedHtml(rewritten
+  const sanitized = rewritten
     .replace(/^<summary-root>/i, '')
     .replace(/<\/summary-root>$/i, '')
-    .trim(), 3);
-  return sanitized || (summaryText ? `<p>${escapeHtml(summaryText)}</p>` : '');
+    .trim();
+  if (isOnThisDaySource(source)) {
+    return sanitized || (summaryText ? `<p>${escapeHtml(summaryText)}</p>` : '');
+  }
+  const truncated = truncateSanitizedHtml(sanitized, 3);
+  return truncated || (summaryText ? `<p>${escapeHtml(summaryText)}</p>` : '');
 }
 
-function buildNotificationPayload(item) {
+function buildNotificationText(historyItem, fallbackText = '') {
+  const text = [
+    stripTags(historyItem.summaryHtml || ''),
+  ].filter(Boolean).join(' ');
+  const normalized = truncateToSentence(
+    normalizeNotificationText(text || fallbackText || ''),
+    180
+  );
+  return normalized || fallbackText || 'New item';
+}
+
+function buildNotificationPayload(historyItem) {
   const notification = {
-    title: item.title,
-    body: item.summaryText || item.description || 'New item',
+    title: historyItem.title || historyItem.sourceKey || 'Notification',
+    body: historyItem.notificationText || 'New item',
     silent: false,
     app_badge: '1'
   };
-  if (item.link) notification.navigate = item.link;
+  if (historyItem.link) notification.navigate = historyItem.link;
   return {
     web_push: 8030,
     notification
@@ -687,8 +715,6 @@ async function processSourceItem(env, source, item, options = {}) {
     return { skipped: true, reason: 'duplicate', sourceKey: source.sourceKey, itemKey };
   }
 
-  const result = await sendToAllSubscriptions(env, buildNotificationPayload(item));
-  await env.SUBS.put(getSourceLastItemKey(source.sourceKey), itemKey);
   const historyItem = {
     id: `${source.sourceKey}:${itemKey}`,
     sourceKey: source.sourceKey,
@@ -701,7 +727,10 @@ async function processSourceItem(env, source, item, options = {}) {
     publishedAt: item.publishedAt || item.updatedAt || '',
     createdAt: new Date().toISOString()
   };
+  historyItem.notificationText = buildNotificationText(historyItem, item.summaryText || item.description || '');
   await appendHistoryItem(env, historyItem);
+  const result = await sendToAllSubscriptions(env, buildNotificationPayload(historyItem));
+  await env.SUBS.put(getSourceLastItemKey(source.sourceKey), itemKey);
   return {
     skipped: false,
     sourceKey: source.sourceKey,
@@ -833,13 +862,17 @@ export default {
         const createdAt = item && item.createdAt ? Date.parse(item.createdAt) : 0;
         return createdAt && (now - createdAt) <= HISTORY_RETENTION_MS;
       }).sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0));
-      const items = await Promise.all(rawItems.map(async (item) => ({
-        ...item,
-        summaryText: cleanHistoryBodyText(item.summaryText),
-        summaryHtml: item.summaryHtml
-          ? await sanitizeSummaryHtml(item.summaryHtml, cleanHistoryBodyText(item.summaryText), '', item)
-          : ''
-      })));
+      const items = await Promise.all(rawItems.map(async (item) => {
+        const sanitizedSummaryHtml = item.summaryHtml
+          ? await sanitizeSummaryHtml(item.summaryHtml, item.notificationText, '', item)
+          : '';
+
+        return {
+          ...item,
+          notificationText: cleanHistoryBodyText(item.notificationText),
+          summaryHtml: sanitizedSummaryHtml
+        };
+      }));
       await putStateJson(env, HISTORY_KEY, rawItems);
       return json({
         ok: true,
@@ -1046,21 +1079,33 @@ export default {
     const work = (async () => {
       initializeVapid(env);
       if (controller.cron === '0 */2 * * *') {
-        await processQWeatherRainAlert(env);
+        try {
+          await processQWeatherRainAlert(env);
+        } catch (error) {
+          console.error('Scheduled weather send failed', error);
+        }
       } else if (controller.cron === '10 0 * * *') {
         for (const feedConfig of DEFAULT_RSS_SOURCES) {
-          await refreshScheduledRssFeedState(env, feedConfig);
+          try {
+            await refreshScheduledRssFeedState(env, feedConfig);
+          } catch (error) {
+            console.error(`Scheduled refresh failed for ${feedConfig.sourceKey}`, error);
+          }
         }
       } else if (controller.cron === '30 0 * * *') {
         for (const feedConfig of DEFAULT_RSS_SOURCES) {
-          const sourceKey = feedConfig.sourceKey;
-          const item = await getStateJson(env, getSourceCurrentKey(sourceKey));
-          if (item) {
-            await processSourceItem(env, {
-              sourceKey,
-              sourceType: 'rss',
-              lang: feedConfig.lang || ''
-            }, item);
+          try {
+            const sourceKey = feedConfig.sourceKey;
+            const item = await getStateJson(env, getSourceCurrentKey(sourceKey));
+            if (item) {
+              await processSourceItem(env, {
+                sourceKey,
+                sourceType: 'rss',
+                lang: feedConfig.lang || ''
+              }, item);
+            }
+          } catch (error) {
+            console.error(`Scheduled send failed for ${feedConfig.sourceKey}`, error);
           }
         }
       }

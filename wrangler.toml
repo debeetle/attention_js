@@ -9,6 +9,14 @@ placement = { mode = "smart" }
 VAPID_PUBLIC_KEY = "BJOm2JBG6kQe5CGPhT-SDrv6VpzdtwCANzJKvRZBBawY8eJ0rxeKtftDGNZS6BdCrjDzqZ0PpE-CMkp9SjNnwDs"
 QWEATHER_LOCATION = "101280610"
 
+[secrets]
+required = [
+  "QWEATHER_PRIVATE_KEY",
+  "SEND_API_KEY",
+  "SUBS_ENC_KEY",
+  "VAPID_PRIVATE_KEY"
+]
+
 [assets]
 directory = "./assets"
 binding = "ASSETS"
