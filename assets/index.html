@@ -4,45 +4,45 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="no-referrer">
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="icon" type="image/png" href="/figure/icon.png">
     <link rel="apple-touch-icon" href="/figure/icon.png">
-    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <!-- <meta name="apple-mobile-web-app-capable" content="yes"> -->
     <meta name="apple-mobile-web-app-status-bar-style" content="black">
     <meta name="apple-mobile-web-app-title" content="Attention">
     <style>
         #permission-grant {
             display: none;
             font-family: sans-serif;
-            margin: 0;
+            /* margin: 0; */
             padding: 0.5rem;
             width: 100%;
             box-sizing: border-box;
             text-align: center;
             background-color: purple;
         }
+
         @font-face {
-            font-family: 'SCP';
-            src: url('font/SourceCodePro-VariableFont_wght.ttf');
-        }
-        @font-face {
-            font-family: 'LM Math';
+            font-family: 'Universal';
             src: url('font/latinmodern-math.otf');
+            unicode-range: U+0000-007F, U+0080-00FF;
+            /* Latin */
         }
+
         @font-face {
-            font-family: 'STZhongsong';
+            font-family: 'Universal';
             src: url('font/STZHONGS.TTF');
+            unicode-range: U+4E00-9FFF;
+            /* CJK */
         }
 
         html,
         body {
             -webkit-overflow-scrolling: touch;
             scrollbar-width: none;
-        }
-
-        html::-webkit-scrollbar,
-        body::-webkit-scrollbar {
-            display: none;
+            font-family: 'Universal';
         }
 
         .notification {
@@ -52,23 +52,21 @@
             border-color: rgb(from currentColor r g b / 60%);
             border-radius: 18px;
         }
-        
+
         a {
             text-decoration: none;
         }
 
-        .article-text {
-            font-family: "LM Math";
-        }
-
-        .no-image-header {
-            display: grid;
-            grid-template-columns: 1.5rem 1fr;
-        }
-
         .favicon {
-            width: 100%;
-            height: auto;
+            width: auto;
+            height: 1.5rem;
+        }
+
+        .no-picture-header {
+            /* display: flex; */
+            margin-top: 0;
+            margin-bottom: 0;
+            /* grid-template-columns: 1.5rem 1fr; */
         }
 
         .notification-meta {
@@ -76,6 +74,10 @@
             font-size: 0.8rem;
             font-weight: bold;
             color: #ccc;
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            /* gap: 1rem; */
         }
 
         :root {
@@ -93,71 +95,40 @@
         .picture-wrap {
             position: relative;
             border-radius: 6px;
-            overflow: hidden;            
+            overflow: hidden;
             border: 1px solid;
             border-color: rgb(from currentColor r g b / 20%);
         }
 
-        .picture-overlay {
-            position: absolute;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            padding: 0.5rem;
-            font-family: sans-serif;
-            font-weight: bold;
-            color: rgba(255, 255, 255, 0.8);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 0.75rem;
-            background: rgba(28, 24, 20, 0.05);
-            -webkit-backdrop-filter: blur(0.2rem);
-            backdrop-filter: blur(0.2rem);
-        }
-
-        .picture-source-logo {
-            /* display: block; */
-            width: auto;
-            height: 1.5rem;
-            /* flex: 0 0 auto; */
-        }
-
-        .on-this-day-paired {
+        .annotated-picture-list {
             display: grid;
-            grid-template-columns: minmax(0, 1fr) auto;
+            /* grid-template-columns: minmax(0, 1fr) minmax(0, 45%); */
+            grid-template-columns: auto 45%;
             gap: 0.5rem;
-            /* align-items: center; */
-            /* margin-bottom: 0.75rem; */
+            /* align-items: start; */
         }
 
         .annotated-picture {
             display: block;
-            width: auto;
-            height: 12rem;
-            /* max-width: 45vw; */
-            /* object-fit: cover; */
-            border-radius: 6px;            
+            max-width: 100%;
+            /* height: auto; */
+            border-radius: 6px;
             border: 1px solid;
             border-color: rgb(from currentColor r g b / 20%);
         }
 
-        .on-this-day-heading {
+        .otd-p-heading {
             margin-top: 0;
+            margin-bottom: 0;
         }
-
         /* wiki potd end */
 
         /* wiki onthisday start */
         ul {
-            margin-top: 0;
-            margin-bottom: 0;
             /* list-style-type: none; */
             padding-left: 1rem;
         }
-        li::marker {
-            font-family: "LM Math";
-        }
+
         /* wiki onthisday end */
 
         @media (prefers-color-scheme: dark) {
@@ -167,8 +138,7 @@
             /* .picture-wrap {
                 border-color: #282a36;
             } */
-        } 
-
+        }
     </style>
 </head>
 
@@ -181,6 +151,13 @@
         const HISTORY_DB_VERSION = 1;
         const HISTORY_STORE_NAME = 'articles';
         const HISTORY_RENDER_LIMIT = 50;
+        const SOURCE_META = {
+            'picture of today': { logo: '/figure/Wikipedia-logo-v2.svg', label: 'picture of today' },
+            'on this day': { logo: '/figure/Wikipedia-logo-v2.svg', label: 'on this day' },
+            'do you know': { logo: '/figure/Wikipedia-logo-v2.svg', label: 'do you know' },
+            'sspai': { logo: '/figure/sspai_400x400.png', label: 'sspai' },
+            'ithome': { logo: '/figure/IThome_logo.png', label: 'ithome' }
+        };
         let hasSubscribed = false;
         let PUBLIC_VAPID_KEY = '';
 
@@ -268,50 +245,22 @@
             root.appendChild(fragment);
         }
 
-        function isWikipediaSource(item) {
-            return ['picture of today', 'on this day', 'do you know'].includes((item.sourceKey || '').toLowerCase());
-        }
-
-        function isOnThisDaySource(item) {
-            return (item.sourceKey || '').toLowerCase() === 'on this day';
-        }
-
         function appendSourceHeader(parent, item) {
             const header = document.createElement('div');
-            header.className = 'no-image-header';
-
-            const logo = document.createElement('div');
-            const iconSrc = sourceIconFor(item);
-            if (iconSrc) {
-                const favicon = document.createElement('img');
-                favicon.className = 'favicon';
-                favicon.src = iconSrc;
-                favicon.alt = item.sourceKey || '';
-                favicon.decoding = 'async';
-                favicon.loading = 'lazy';
-                favicon.fetchPriority = 'low';
-                logo.appendChild(favicon);
-            }
-            header.appendChild(logo);
+            header.className = 'no-picture-header';
 
             const title = document.createElement('div');
-            title.style.paddingLeft = "1rem";
             title.textContent = item.title || '';
             header.appendChild(title);
             parent.appendChild(header);
         }
 
         function buildNotification(item, index) {
-            const notification = document.createElement('article');
+            const notification = document.createElement('div');
             notification.className = 'notification';
+            const isOnThisDay = (item.sourceKey || '').toLowerCase() === 'on this day';
 
-            if (item.link) {
-                notification.addEventListener('click', () => {
-                    window.location.assign(item.link);
-                });
-            }
-
-            if (item.imageUrl && !isOnThisDaySource(item)) {
+            if (item.imageUrl && !isOnThisDay) {
                 const pictureWrap = document.createElement('div');
                 pictureWrap.className = 'picture-wrap';
 
@@ -324,27 +273,6 @@
                 picture.fetchPriority = index === 0 ? 'high' : 'low';
                 pictureWrap.appendChild(picture);
 
-                const overlay = document.createElement('div');
-                overlay.className = 'picture-overlay';
-
-                if (item.imageAlt) {
-                    const title = document.createElement('div');
-                    title.className = 'picture-title';
-                    title.textContent = item.imageAlt;
-                    overlay.appendChild(title);
-                }
-
-                if (isWikipediaSource(item)) {
-                    const logo = document.createElement('img');
-                    logo.className = 'picture-source-logo';
-                    logo.src = '/figure/Wikipedia-logo-v2.svg';
-                    logo.alt = 'Wikipedia';
-                    logo.decoding = 'async';
-                    overlay.appendChild(logo);
-                }
-
-                pictureWrap.appendChild(overlay);
-
                 notification.appendChild(pictureWrap);
 
                 appendBody(notification, item);
@@ -352,7 +280,7 @@
                 return notification;
             }
 
-            if (isOnThisDaySource(item)) {
+            if (isOnThisDay) {
                 appendOnThisDayBody(notification, item);
                 appendMetaRow(notification, item);
                 return notification;
@@ -367,22 +295,38 @@
         function appendMetaRow(parent, item) {
             const row = document.createElement('div');
             row.className = 'notification-meta';
-            row.textContent = item.sourceKey + ' ' + elapsedHoursText(item.publishedAt);
+            const sourceMeta = SOURCE_META[(item.sourceKey || '').toLowerCase()] || {};
+
+            const source = document.createElement('div');
+            source.className = 'notification-meta-source';
+            source.textContent = (sourceMeta.label || item.sourceKey || '') + ' ' + elapsedHoursText(item.publishedAt);
+            row.appendChild(source);
+
+            if (item.link && sourceMeta.logo) {
+                const more = document.createElement('a');
+                more.href = item.link;
+                const logo = document.createElement('img');
+                logo.className = 'favicon';
+                logo.src = sourceMeta.logo;
+                logo.alt = sourceMeta.label || item.sourceKey || '';
+                logo.decoding = 'async';
+                logo.loading = 'lazy';
+                logo.fetchPriority = 'low';
+                more.appendChild(logo);
+                row.appendChild(more);
+            }
 
             parent.appendChild(row);
         }
 
         function appendBody(parent, item) {
-            if (isOnThisDaySource(item)) {
+            if ((item.sourceKey || '').toLowerCase() === 'on this day') {
                 appendOnThisDayBody(parent, item);
                 return;
             }
 
             const articleText = document.createElement('div');
             articleText.className = 'article-text';
-            if (item.lang) {
-                articleText.style.fontFamily = "STZhongsong";
-            }
             if (item.summaryHtml) {
                 articleText.innerHTML = item.summaryHtml;
             }
@@ -394,39 +338,15 @@
             const articleText = document.createElement('div');
             articleText.className = 'article-text';
 
-            const template = document.createElement('template');
-            template.innerHTML = item.summaryHtml || '';
+            const wrapper = document.createElement('div');
+            wrapper.innerHTML = item.summaryHtml || '';
 
-            const heading = template.content.querySelector('p');
-            const allEntries = Array.from(template.content.querySelectorAll('li'));
+            const heading = wrapper.querySelector('p');
+            const allEntries = Array.from(wrapper.querySelectorAll('li'));
 
-            if (heading || isWikipediaSource(item)) {
-                const header = document.createElement('div');
-                header.className = 'no-image-header';
-
-                const logoWrap = document.createElement('div');
-                if (isWikipediaSource(item)) {
-                    const logo = document.createElement('img');
-                    logo.className = 'favicon';
-                    logo.src = '/figure/Wikipedia-logo-v2.svg';
-                    logo.alt = 'Wikipedia';
-                    logo.decoding = 'async';
-                    logo.loading = 'lazy';
-                    logo.fetchPriority = 'low';
-                    logoWrap.appendChild(logo);
-                }
-                header.appendChild(logoWrap);
-
-                const headingWrap = document.createElement('div');
-                headingWrap.style.paddingLeft = '1rem';
-                if (heading) {
-                    const headingNode = heading.cloneNode(true);
-                    headingNode.classList.add('on-this-day-heading');
-                    headingWrap.appendChild(headingNode);
-                }
-                header.appendChild(headingWrap);
-
-                articleText.appendChild(header);
+            if (heading) {
+                heading.classList.add('no-picture-header');
+                articleText.appendChild(heading);
             }
 
             if (allEntries.length) {
@@ -459,13 +379,13 @@
 
         function buildOnThisDayEntry(entry, item) {
             const cleanEntry = entry.cloneNode(true);
-            cleanEntry.querySelectorAll('img, .annotated-picture, .on-this-day-paired-image').forEach((node) => node.remove());
-            cleanEntry.querySelectorAll('.on-this-day-paired, .on-this-day-paired-text').forEach(unwrapElement);
+            cleanEntry.querySelectorAll('img, .annotated-picture').forEach((node) => node.remove());
+            cleanEntry.querySelectorAll('.annotated-picture-list').forEach(unwrapElement);
 
             const li = document.createElement('li');
             if (/\((pictured|depicted)\)/i.test(cleanEntry.textContent || '') && item.imageUrl) {
                 const row = document.createElement('div');
-                row.className = 'on-this-day-paired';
+                row.className = 'annotated-picture-list';
 
                 const text = document.createElement('div');
                 text.className = 'article-text';
@@ -501,13 +421,6 @@
                 parent.insertBefore(element.firstChild, element);
             }
             parent.removeChild(element);
-        }
-
-        function sourceIconFor(item) {
-            if (isWikipediaSource(item)) {
-                return '/figure/Wikipedia-logo-v2.svg';
-            }
-            return '';
         }
 
         function elapsedHoursText(value) {
@@ -614,7 +527,7 @@
             }
         });
     </script>
-    
+
 </body>
 
 </html>

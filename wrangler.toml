@@ -28,7 +28,7 @@ binding = "SUBS"
 id = "c659f42d555b4a4ca17c7653677e64cc"
 
 [triggers]
-crons = ["0 */1 * * *", "10 0 * * *", "30 0 * * *"]
+crons = ["0 */1 * * *", "15 0 * * *", "0 0,4,8,12 * * *"]
 
 [[routes]]
 pattern = "attention.debeetle.cn.eu.org"
