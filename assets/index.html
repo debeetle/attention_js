@@ -3,20 +3,19 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="referrer" content="no-referrer">
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="icon" type="image/png" href="/figure/icon.png">
     <link rel="apple-touch-icon" href="/figure/icon.png">
     <meta name="mobile-web-app-capable" content="yes">
-    <!-- <meta name="apple-mobile-web-app-capable" content="yes"> -->
     <meta name="apple-mobile-web-app-status-bar-style" content="black">
     <meta name="apple-mobile-web-app-title" content="Attention">
     <style>
         #permission-grant {
             display: none;
             font-family: sans-serif;
-            /* margin: 0; */
             padding: 0.5rem;
             width: 100%;
             box-sizing: border-box;
@@ -28,14 +27,12 @@
             font-family: 'Universal';
             src: url('font/latinmodern-math.otf');
             unicode-range: U+0000-007F, U+0080-00FF;
-            /* Latin */
         }
 
         @font-face {
             font-family: 'Universal';
             src: url('font/STZHONGS.TTF');
             unicode-range: U+4E00-9FFF;
-            /* CJK */
         }
 
         html,
@@ -43,14 +40,24 @@
             -webkit-overflow-scrolling: touch;
             scrollbar-width: none;
             font-family: 'Universal';
+            touch-action: manipulation;
+            /* margin: 0; */
+        }
+
+        :root {
+            color-scheme: light dark;
+            --main-borderadius: 18px;
+            --main-pad: 12px;
         }
 
         .notification {
             margin: 1rem 0 1rem 0;
-            padding: 12px;
+            padding: var(--main-pad);
             border: 1px solid;
             border-color: rgb(from currentColor r g b / 60%);
-            border-radius: 18px;
+            border-radius: var(--main-borderadius);
+            overflow-wrap: anywhere;
+            max-width: 30rem;
         }
 
         a {
@@ -58,15 +65,9 @@
         }
 
         .favicon {
+            display: block;
             width: auto;
             height: 1.5rem;
-        }
-
-        .no-picture-header {
-            /* display: flex; */
-            margin-top: 0;
-            margin-bottom: 0;
-            /* grid-template-columns: 1.5rem 1fr; */
         }
 
         .notification-meta {
@@ -76,42 +77,58 @@
             color: #ccc;
             display: flex;
             justify-content: space-between;
-            align-items: baseline;
-            /* gap: 1rem; */
+            align-items: end;
+            margin-top: 0.5rem;
         }
 
-        :root {
-            color-scheme: light dark;
-        }
 
-        /* Big image*/
+
         .picture {
             display: block;
             width: 100%;
-            max-height: 22rem;
+            max-height: 20rem;
             object-fit: cover;
+            background: white;
         }
 
         .picture-wrap {
             position: relative;
-            border-radius: 6px;
+            border-radius: calc(var(--main-borderadius) - var(--main-pad));
             overflow: hidden;
             border: 1px solid;
             border-color: rgb(from currentColor r g b / 20%);
         }
 
+        .picture-overlay {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            padding: 0.5rem;
+            color: white;
+            font-size: 0.8rem;
+            background-color: rgba(255, 255, 255, 0.2);
+            -webkit-backdrop-filter: blur(1rem);
+            backdrop-filter: blur(1rem);
+            box-shadow:
+                inset 0 1px 2px rgba(255, 255, 255, 0.6),
+                inset 0 0.5rem 1rem rgba(3, 7, 18, 0.2),
+                0px 0px 0px rgba(3, 7, 18, 0.10),
+                0px 0px 1px rgba(3, 7, 18, 0.08),
+                0px 0px 2px rgba(3, 7, 18, 0.06),
+                0px 0px 3px rgba(3, 7, 18, 0.04),
+                0px 0px 4px rgba(3, 7, 18, 0.02);
+        }
+
         .annotated-picture-list {
             display: grid;
-            /* grid-template-columns: minmax(0, 1fr) minmax(0, 45%); */
             grid-template-columns: auto 45%;
             gap: 0.5rem;
-            /* align-items: start; */
         }
 
         .annotated-picture {
             display: block;
             max-width: 100%;
-            /* height: auto; */
             border-radius: 6px;
             border: 1px solid;
             border-color: rgb(from currentColor r g b / 20%);
@@ -121,45 +138,119 @@
             margin-top: 0;
             margin-bottom: 0;
         }
-        /* wiki potd end */
 
-        /* wiki onthisday start */
         ul {
-            /* list-style-type: none; */
             padding-left: 1rem;
         }
 
         /* wiki onthisday end */
 
-        @media (prefers-color-scheme: dark) {
-            /* .notification {
-                border-color: #5a5a5a;
-            } */
-            /* .picture-wrap {
-                border-color: #282a36;
-            } */
+        nav {
+            touch-action: none;
+            position: fixed;
+            bottom: env(safe-area-inset-bottom, 0px);
+            left: 22px;
+            height: 3.5rem;
+            width: 3.5rem;
+            align-items: center;
+            justify-content: center;
+            z-index: 1;
+            border-color: none;
+            border-radius: 50%;
+            background-color: rgba(250, 250, 250, 0.05);
+            backdrop-filter: blur(0.2rem);
+            box-shadow:
+                inset 0 1px 2px white,
+                inset 0 5px 10px rgba(3, 7, 18, 0.1),
+                inset 0 -5px 10px rgba(255, 255, 255, 0.1),
+                inset 0 -1px 2px white,
+                0px 0px 0px rgb(from currentColor calc(3 - r*3/255) calc(7 - g*7/255) calc(18 - b*18/255) / 10%),
+                0px 1px 2px rgb(from currentColor calc(3 - r*3/255) calc(7 - g*7/255) calc(18 - b*18/255) / 8%),
+                0px 2px 4px rgb(from currentColor calc(3 - r*3/255) calc(7 - g*7/255) calc(18 - b*18/255) / 6%),
+                0px 3px 6px rgb(from currentColor calc(3 - r*3/255) calc(7 - g*7/255) calc(18 - b*18/255) / 4%),
+                0px 4px 8px rgb(from currentColor calc(3 - r*3/255) calc(7 - g*7/255) calc(18 - b*18/255) / 2%);
+            transition: 
+                width 0.4s cubic-bezier(0.25, 0.8, 0.25, 1.2),
+                height 0.4s cubic-bezier(0.25, 0.8, 0.25, 1.2),
+                border-radius 0.2s ease,
+                background-color 0.2s ease;
         }
+
+        nav.open {
+            height: 16rem;
+            width: 12rem;
+            align-items: center;
+            justify-content: center;
+            border-radius: var(--main-borderadius);
+            padding: 8px;
+            background: rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(1.5rem);
+            box-shadow:
+                inset 0 1px 2px white,
+                inset 0 5px 10px rgba(3, 7, 18, 0.1),
+                inset 0 -5px 10px rgba(255, 255, 255, 0.1),
+                inset 0 -1px 2px white,
+                0px 0px 0px rgb(from currentColor calc(3 - r*3/255) calc(7 - g*7/255) calc(18 - b*18/255) / 10%),
+                0px 1px 2px rgb(from currentColor calc(3 - r*3/255) calc(7 - g*7/255) calc(18 - b*18/255) / 8%),
+                0px 2px 4px rgb(from currentColor calc(3 - r*3/255) calc(7 - g*7/255) calc(18 - b*18/255) / 6%),
+                0px 3px 6px rgb(from currentColor calc(3 - r*3/255) calc(7 - g*7/255) calc(18 - b*18/255) / 4%),
+                0px 4px 8px rgb(from currentColor calc(3 - r*3/255) calc(7 - g*7/255) calc(18 - b*18/255) / 2%);
+        }
+
+        nav li {
+            visibility: hidden;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 0.5rem;
+            list-style: none;
+            background: none;
+            font-family: sans-serif;
+            font-weight: bold;
+            border-radius: calc(var(--main-borderadius) - 8px);
+            /* cursor: pointer; */
+            transition: 
+            background 0.1s ease;
+        }
+
+        nav.open li {
+            visibility: visible;
+        }
+
+        nav li img {
+            width: 1.5rem;
+            height: 1.5rem;
+        }
+
+        nav li.selected {
+            background: rgba(0, 0, 0, 0.3);
+            /* color: blue; */
+        }
+
     </style>
 </head>
 
 <body>
-    <div id="permission-grant">register</div>
+    <div id="permission-grant"></div>
+    <nav></nav>
     <div id="history"></div>
 
     <script>
-        const HISTORY_DB_NAME = 'attention-history';
+        const HISTORY_DB_NAME = 'attention';
         const HISTORY_DB_VERSION = 1;
-        const HISTORY_STORE_NAME = 'articles';
-        const HISTORY_RENDER_LIMIT = 50;
+        const HISTORY_STORE_NAME = 'news';
+        const HISTORY_RENDER_LIMIT = 100;
         const SOURCE_META = {
-            'picture of today': { logo: '/figure/Wikipedia-logo-v2.svg', label: 'picture of today' },
-            'on this day': { logo: '/figure/Wikipedia-logo-v2.svg', label: 'on this day' },
-            'do you know': { logo: '/figure/Wikipedia-logo-v2.svg', label: 'do you know' },
-            'sspai': { logo: '/figure/sspai_400x400.png', label: 'sspai' },
-            'ithome': { logo: '/figure/IThome_logo.png', label: 'ithome' }
+            'picture of the day': { logo: '/figure/Wikipedia-logo-v2.svg' },
+            'on this day': { logo: '/figure/Wikipedia-logo-v2.svg' },
+            'do you know': { logo: '/figure/Wikipedia-logo-v2.svg' },
+            'sspai': { logo: '/figure/sspai_400x400.png' },
+            'ithome': { logo: '/figure/IThome_logo.png' }
         };
         let hasSubscribed = false;
         let PUBLIC_VAPID_KEY = '';
+        let activeSource = '';
+        let allItems = [];
 
         function transactionDone(transaction) {
             return new Promise((resolve, reject) => {
@@ -234,6 +325,8 @@
         }
 
         function renderHistory(items) {
+            allItems = items;
+            if (activeSource) items = items.filter(it => (it.sourceKey || '').toLowerCase() === activeSource);
             const root = document.getElementById('history');
             root.replaceChildren();
             if (!Array.isArray(items)) return;
@@ -246,21 +339,20 @@
         }
 
         function appendSourceHeader(parent, item) {
-            const header = document.createElement('div');
-            header.className = 'no-picture-header';
 
             const title = document.createElement('div');
             title.textContent = item.title || '';
-            header.appendChild(title);
-            parent.appendChild(header);
+            parent.appendChild(title);
         }
 
         function buildNotification(item, index) {
             const notification = document.createElement('div');
             notification.className = 'notification';
             const isOnThisDay = (item.sourceKey || '').toLowerCase() === 'on this day';
+            const isIthome = (item.sourceKey || '').toLowerCase() === 'ithome';
+            const isPotd = (item.sourceKey || '').toLowerCase() === 'picture of the day';
 
-            if (item.imageUrl && !isOnThisDay) {
+            if (item.imageUrl && !isOnThisDay && !isIthome) {
                 const pictureWrap = document.createElement('div');
                 pictureWrap.className = 'picture-wrap';
 
@@ -273,9 +365,27 @@
                 picture.fetchPriority = index === 0 ? 'high' : 'low';
                 pictureWrap.appendChild(picture);
 
+                const overlay = document.createElement('div');
+                overlay.className = 'picture-overlay';
+
+                if (isPotd && item.summaryHtml) {
+                    const d = document.createElement('div');
+                    d.innerHTML = item.summaryHtml;
+                    const t = (d.textContent || '').trim();
+                    const i = t.search(/[.!?。！？]/);
+                    const first = i >= 0 ? t.slice(0, i + 1) : t;
+                    if (first) {
+                        const title = document.createElement('div');
+                        title.textContent = first;
+                        overlay.appendChild(title);
+                    }
+                }
+
+                pictureWrap.appendChild(overlay);
+
                 notification.appendChild(pictureWrap);
 
-                appendBody(notification, item);
+                if (!isPotd) appendBody(notification, item);
                 appendMetaRow(notification, item);
                 return notification;
             }
@@ -299,7 +409,7 @@
 
             const source = document.createElement('div');
             source.className = 'notification-meta-source';
-            source.textContent = (sourceMeta.label || item.sourceKey || '') + ' ' + elapsedHoursText(item.publishedAt);
+            source.textContent = (item.sourceKey || '') + ' ' + elapsedHoursText(item.publishedAt);
             row.appendChild(source);
 
             if (item.link && sourceMeta.logo) {
@@ -308,7 +418,7 @@
                 const logo = document.createElement('img');
                 logo.className = 'favicon';
                 logo.src = sourceMeta.logo;
-                logo.alt = sourceMeta.label || item.sourceKey || '';
+                logo.alt = item.sourceKey || '';
                 logo.decoding = 'async';
                 logo.loading = 'lazy';
                 logo.fetchPriority = 'low';
@@ -324,9 +434,10 @@
                 appendOnThisDayBody(parent, item);
                 return;
             }
+            if ((item.sourceKey || '').toLowerCase() === 'ithome') return;
+            if (!item.summaryHtml) return;
 
             const articleText = document.createElement('div');
-            articleText.className = 'article-text';
             if (item.summaryHtml) {
                 articleText.innerHTML = item.summaryHtml;
             }
@@ -336,7 +447,6 @@
 
         function appendOnThisDayBody(parent, item) {
             const articleText = document.createElement('div');
-            articleText.className = 'article-text';
 
             const wrapper = document.createElement('div');
             wrapper.innerHTML = item.summaryHtml || '';
@@ -344,18 +454,20 @@
             const heading = wrapper.querySelector('p');
             const allEntries = Array.from(wrapper.querySelectorAll('li'));
 
-            if (heading) {
-                heading.classList.add('no-picture-header');
-                articleText.appendChild(heading);
-            }
+            heading.style.marginTop = '0';
+            articleText.appendChild(heading);
 
             if (allEntries.length) {
                 const entries = selectOnThisDayEntries(allEntries, findPicturedIndex(allEntries));
-                const list = document.createElement('ul');
-                for (const entry of entries) {
-                    list.appendChild(buildOnThisDayEntry(entry, item));
+                if (entries.length === 1) {
+                    moveChildren(buildOnThisDayEntry(entries[0], item), articleText);
+                } else {
+                    const list = document.createElement('ul');
+                    for (const entry of entries) {
+                        list.appendChild(buildOnThisDayEntry(entry, item));
+                    }
+                    articleText.appendChild(list);
                 }
-                articleText.appendChild(list);
             }
 
             if (!heading && !allEntries.length && item.summaryHtml) {
@@ -370,10 +482,7 @@
         }
 
         function selectOnThisDayEntries(entries, picturedIndex) {
-            if (picturedIndex >= 0 && picturedIndex > 2) {
-                const indexes = [0, 1, picturedIndex];
-                return indexes.filter((i) => i < entries.length).map((i) => entries[i]);
-            }
+            if (picturedIndex >= 0) return [entries[picturedIndex]];
             return entries.slice(0, 3);
         }
 
@@ -388,7 +497,6 @@
                 row.className = 'annotated-picture-list';
 
                 const text = document.createElement('div');
-                text.className = 'article-text';
                 moveChildren(cleanEntry, text);
 
                 const image = document.createElement('img');
@@ -428,7 +536,6 @@
             if (!Number.isFinite(publishedAt)) return '';
             const hours = Math.max(0, Math.floor((Date.now() - publishedAt) / (60 * 60 * 1000)));
             return `${hours}h`;
-            // return `${hours} ${hours === 1 ? 'hour' : 'hours'}`;
         }
 
         async function renderLocalHistory() {
@@ -472,7 +579,7 @@
 
                 if (Notification.permission !== 'granted') return;
 
-                const existingSubscription = typeof window.pushManager.getSubscription === 'function'
+                const existingSubscription = window.pushManager && typeof window.pushManager.getSubscription === 'function'
                     ? await window.pushManager.getSubscription()
                     : null;
 
@@ -496,6 +603,40 @@
 
         window.addEventListener('load', async () => {
             const button = document.getElementById('permission-grant');
+
+            // Build source picker from SOURCE_META
+            const nav = document.querySelector('nav');
+
+            const entries = [{ key: '', label: 'All', logo: null },
+                ...Object.entries(SOURCE_META).map(([sk, m]) => ({ key: sk, label: sk, logo: m.logo }))];
+            for (const { key, label, logo } of entries) {
+                const li = document.createElement('li');
+                li.dataset.key = key;
+                if (logo) { const img = document.createElement('img'); img.src = logo; li.appendChild(img); }
+                li.appendChild(document.createTextNode(label));
+                nav.appendChild(li);
+            }
+
+            nav.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                nav.classList.add('open');
+            });
+            nav.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                const t = e.touches[0];
+                const el = document.elementFromPoint(t.clientX, t.clientY);
+                nav.querySelectorAll('li').forEach(li => li.classList.toggle('selected', li === el || li.contains(el)));
+                const key = el?.closest('li')?.dataset.key;
+                if (key !== undefined) { activeSource = key; renderHistory(allItems); }
+            });
+            nav.addEventListener('touchend', (e) => {
+                nav.classList.remove('open');
+                syncHistory();
+            });
+            document.addEventListener('click', (e) => {
+                if (!nav.contains(e.target)) nav.classList.remove('open');
+            });
+
             renderLocalHistory();
             syncHistory();
 
@@ -516,7 +657,7 @@
             }
 
             if (Notification.permission === 'granted') {
-                if (typeof window.pushManager.getSubscription === 'function') {
+                if (window.pushManager && typeof window.pushManager.getSubscription === 'function') {
                     const existingSubscription = await window.pushManager.getSubscription();
                     if (existingSubscription) {
                         hasSubscribed = true;

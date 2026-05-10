@@ -2,1286 +2,935 @@ import { setVapidDetails, sendNotification } from './pwanotify.js';
 import { buildQWeatherAuthorizationHeader } from './qweather-jwt.js';
 import { XMLParser } from 'fast-xml-parser';
 
-const SHANGHAI_TIME_ZONE = 'Asia/Shanghai';
-const HISTORY_KEY = 'history:items';
-const HISTORY_LIMIT = 50;
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+const SHANGHAI_TZ = 'Asia/Shanghai';
+const HISTORY_KEY = 'items';
+const HISTORY_LIMIT = 100;
 const HISTORY_RETENTION_MS = 3 * 24 * 60 * 60 * 1000;
 const QWEATHER_API_HOST = 'mh7mdaq86q.re.qweatherapi.com';
+
 const DEFAULT_RSS_SOURCES = [
-    {
-        sourceKey: 'picture of today',
-        feedUrl: 'https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=potd&feedformat=atom',
-        sendCrons: ['15 0 * * *'],
-        refreshCrons: ['15 0 * * *']
-    },
-    {
-        sourceKey: 'on this day',
-        feedUrl: 'https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=onthisday&feedformat=atom',
-        sendCrons: ['15 0 * * *'],
-        refreshCrons: ['15 0 * * *']
-    },
-    {
-        sourceKey: 'do you know',
-        feedUrl: 'https://zh.wikipedia.org/w/api.php?action=featuredfeed&feed=dyk&feedformat=atom',
-        sendCrons: ['15 0 * * *'],
-        refreshCrons: ['15 0 * * *']
-    },
-    {
-        sourceKey: 'sspai',
-        feedUrl: 'https://sspai.com/feed',
-        includeKeywords: [],
-        excludeKeywords: [],
-        sendCrons: ['0 0,4,8,12 * * *'],
-        refreshCrons: ['0 0,4,8,12 * * *']
-    },
-    {
-        sourceKey: 'ithome',
-        feedUrl: 'https://www.ithome.com/rss/',
-        includeKeywords: [],
-        excludeKeywords: [],
-        sendCrons: ['0 0,4,8,12 * * *'],
-        refreshCrons: ['0 0,4,8,12 * * *']
-    }
+  { sourceKey: 'picture of the day', feedUrl: 'https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=potd&feedformat=atom',
+    sendCrons: ['15 0 * * *'], refreshCrons: ['15 0 * * *'] },
+  { sourceKey: 'on this day', feedUrl: 'https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=onthisday&feedformat=atom',
+    sendCrons: ['15 0 * * *'], refreshCrons: ['15 0 * * *'] },
+  { sourceKey: 'do you know', feedUrl: 'https://zh.wikipedia.org/w/api.php?action=featuredfeed&feed=dyk&feedformat=atom',
+    sendCrons: ['15 0 * * *'], refreshCrons: ['15 0 * * *'] },
+  { sourceKey: 'sspai', feedUrl: 'https://sspai.com/feed',
+    includeKeywords: [], excludeKeywords: [],
+    sendCrons: ['0 0,4,8,12 * * *'], refreshCrons: ['0 0,4,8,12 * * *'] },
+  { sourceKey: 'ithome', feedUrl: 'https://www.ithome.com/rss/',
+    includeKeywords: ["iOS"], excludeKeywords: ['车', '追觅'],
+    sendCrons: ['0 0,4,8,12 * * *'], refreshCrons: ['0 0,4,8,12 * * *'] }
 ];
+
 const FEED_XML_PARSER = new XMLParser({
-    ignoreAttributes: false,
-    attributeNamePrefix: '',
-    trimValues: false,
-    parseTagValue: false,
-    parseAttributeValue: false,
-    processEntities: false,
-    cdataPropName: '__cdata',
-    stopNodes: ['*.summary', '*.content', '*.description']
+  ignoreAttributes: false, attributeNamePrefix: '',
+  trimValues: false, parseTagValue: false, parseAttributeValue: false,
+  processEntities: false, cdataPropName: '__cdata',
+  stopNodes: ['*.summary', '*.content', '*.description']
 });
-const BASE_ALLOWED_SUMMARY_TAGS = new Set(['p', 'a', 'ul', 'li', 'i', 'em', 'abbr', 'small', 'sup', 'sub', 'br']);
-const DROP_SUMMARY_TAGS = new Set(['script', 'style', 'link', 'img']);
 
-function base64ToUint8Array(b64) {
-    const bin = atob(b64);
-    const arr = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-    return arr;
+// Tags whose content is kept but the tag itself is removed (unwrap).
+const UNWRAP_TAGS = new Set(['b', 'strong']);
+// Tags that are removed entirely including children.
+const DROP_TAGS = new Set(['script', 'style', 'link', 'img']);
+
+const SOURCE_DISPLAY_NAMES = {
+  'picture of the day': '[POTD]', 'on this day': '[OTD]', 'do you know': '[DYK]',
+  'sspai': '[sspai]', 'ithome': '[IThome]', 'weather': '[Weather]'
+};
+
+// ---------------------------------------------------------------------------
+// Crypto helpers
+// ---------------------------------------------------------------------------
+function b64ToU8(b64) {
+  const bin = atob(b64), arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return arr;
 }
 
-async function aesGcmEncrypt(rawKeyBase64, plaintextStr) {
-    const keyBytes = base64ToUint8Array(rawKeyBase64);
-    const key = await crypto.subtle.importKey('raw', keyBytes, 'AES-GCM', false, ['encrypt']);
-    const iv = crypto.getRandomValues(new Uint8Array(12));
-    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(plaintextStr));
-    return { iv: Array.from(iv), ct: Array.from(new Uint8Array(ct)) };
+async function aesGcmEncrypt(rawKeyB64, plaintext) {
+  const key = await crypto.subtle.importKey('raw', b64ToU8(rawKeyB64), 'AES-GCM', false, ['encrypt']);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(plaintext));
+  return { iv: Array.from(iv), ct: Array.from(new Uint8Array(ct)) };
 }
 
-async function aesGcmDecrypt(rawKeyBase64, ivArr, ctArr) {
-    const keyBytes = base64ToUint8Array(rawKeyBase64);
-    const key = await crypto.subtle.importKey('raw', keyBytes, 'AES-GCM', false, ['decrypt']);
-    const iv = new Uint8Array(ivArr);
-    const ct = new Uint8Array(ctArr).buffer;
-    const ptBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct);
-    return new TextDecoder().decode(ptBuf);
+async function aesGcmDecrypt(rawKeyB64, ivArr, ctArr) {
+  const key = await crypto.subtle.importKey('raw', b64ToU8(rawKeyB64), 'AES-GCM', false, ['decrypt']);
+  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: new Uint8Array(ivArr) }, key, new Uint8Array(ctArr).buffer);
+  return new TextDecoder().decode(pt);
 }
 
 async function sha256hex(str) {
-    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
-    const arr = new Uint8Array(buf);
-    return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-function splitCsv(value) {
-    return (value || '').split(',').map(s => s.trim()).filter(Boolean);
-}
-
-function getRequestOrigin(request) {
-    return request.headers.get('Origin') || request.headers.get('Referer') || '';
-}
-
-function isOriginAllowed(request, allowedList) {
-    if (!allowedList || allowedList.length === 0) return true;
-    const origin = getRequestOrigin(request);
-    if (!origin) return false;
-    return allowedList.some(item => origin.startsWith(item));
-}
-
-function safeEqual(a, b) {
-    if (typeof a !== 'string' || typeof b !== 'string') return false;
-    if (a.length !== b.length) return false;
-    let out = 0;
-    for (let i = 0; i < a.length; i++) out |= a.charCodeAt(i) ^ b.charCodeAt(i);
-    return out === 0;
-}
-
-function formEncode(params) {
-    return Object.entries(params)
-        .filter(([, value]) => value !== undefined && value !== null && String(value).length > 0)
-        .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)
-        .join('&');
-}
-
-function initializeVapid(env) {
-    if (env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY) {
-        setVapidDetails(
-            env.VAPID_SUBJECT || 'mailto:nobody@example.com',
-            env.VAPID_PUBLIC_KEY,
-            env.VAPID_PRIVATE_KEY
-        );
-    }
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 async function hmacHex(secret, data, hash = 'SHA-256') {
-    const key = await crypto.subtle.importKey(
-        'raw',
-        new TextEncoder().encode(secret),
-        { name: 'HMAC', hash: { name: hash } },
-        false,
-        ['sign']
-    );
-    const sig = await crypto.subtle.sign('HMAC', key, data);
-    return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, '0')).join('');
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: { name: hash } }, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', key, data);
+  return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function verifyWebhookSignature(request, rawBody, secret) {
-    if (!secret) return true;
-    const sig256 = request.headers.get('x-hub-signature-256') || request.headers.get('x-signature-sha256') || '';
-    const sig1 = request.headers.get('x-hub-signature') || request.headers.get('x-signature-sha1') || '';
+// ---------------------------------------------------------------------------
+// General utilities
+// ---------------------------------------------------------------------------
+const splitCsv = v => (v || '').split(',').map(s => s.trim()).filter(Boolean);
 
-    if (sig256.startsWith('sha256=')) {
-        const expected = await hmacHex(secret, rawBody, 'SHA-256');
-        return safeEqual(`sha256=${expected}`, sig256);
+const escapeHtml = s => (s || '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+function toAbsoluteUrl(url, base = '') {
+  if (!url) return '';
+  if (url.startsWith('//')) return `https:${url}`;
+  try { return base ? new URL(url, base).toString() : new URL(url).toString(); }
+  catch { return url; }
+}
+
+function truncateToSentence(text, maxLen = 10) {
+  const s = (text || '').replace(/\s+/g, ' ').trim();
+  if (s.length <= maxLen) return s;
+  const cut = s.slice(0, maxLen);
+  const end = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? '),
+    cut.lastIndexOf('。'), cut.lastIndexOf('！'), cut.lastIndexOf('？'));
+  return end >= 20 ? `${cut.slice(0, end + 1).trim()}...` : `${cut.trim()}...`;
+}
+
+const safeEqual = (a, b) => {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  let out = 0;
+  for (let i = 0; i < a.length; i++) out |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return out === 0;
+};
+
+const formEncode = params => Object.entries(params)
+  .filter(([, v]) => v !== undefined && v !== null && String(v).length > 0)
+  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join('&');
+
+function isOriginAllowed(request, allowedList) {
+  if (!allowedList || allowedList.length === 0) return true;
+  const origin = request.headers.get('Origin') || request.headers.get('Referer') || '';
+  return origin && allowedList.some(item => origin.startsWith(item));
+}
+
+// ---------------------------------------------------------------------------
+// VAPID
+// ---------------------------------------------------------------------------
+function initializeVapid(env) {
+  if (env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY) {
+    setVapidDetails(env.VAPID_SUBJECT || 'mailto:nobody@example.com',
+      env.VAPID_PUBLIC_KEY, env.VAPID_PRIVATE_KEY);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// HTML sanitization (HTMLRewriter)
+// ---------------------------------------------------------------------------
+function sanitizeHref(href, baseUrl) {
+  const url = toAbsoluteUrl(href || '', baseUrl);
+  try { const u = new URL(url); if (u.protocol === 'http:' || u.protocol === 'https:') return u.toString(); }
+  catch { /* invalid */ }
+  return '';
+}
+
+/**
+ * HTMLRewriter element handler: strips disallowed tags/attrs,
+ * unwraps unknown tags, sanitises <a href>.
+ */
+class SummaryElementSanitizer {
+  constructor(baseUrl) {
+    this.baseUrl = baseUrl;
+  }
+
+  element(element) {
+    const tag = (element.tagName || '').toLowerCase();
+    if (!tag) return;
+
+    if (DROP_TAGS.has(tag)) {
+      element.remove();
+      return;
     }
 
-    if (sig1.startsWith('sha1=')) {
-        const expected = await hmacHex(secret, rawBody, 'SHA-1');
-        return safeEqual(`sha1=${expected}`, sig1);
+    // Strip inline style from every element
+    if (element.hasAttribute('style')) {
+      element.removeAttribute('style');
     }
 
-    return false;
-}
-
-async function fetchFeedPreview(feedUrl) {
-    const res = await fetch(feedUrl, {
-        headers: {
-            'User-Agent': 'Attention-Worker/1.0',
-            'Accept': 'application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.1'
-        }
-    });
-    const text = await res.text();
-    return { status: res.status, contentType: res.headers.get('content-type') || '', text };
-}
-
-function normalizeApiHost(host) {
-    if (!host) return '';
-    return /^https?:\/\//i.test(host) ? host.replace(/\/+$/g, '') : `https://${host.replace(/\/+$/g, '')}`;
-}
-
-function formatHourlyForecastTime(value) {
-    try {
-        return new Intl.DateTimeFormat('en-GB', {
-            timeZone: SHANGHAI_TIME_ZONE,
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: false,
-            month: 'numeric',
-            day: 'numeric'
-        }).format(new Date(value));
-    } catch {
-        return value || '';
-    }
-}
-
-function isRainText(text) {
-    return /(雨|雷阵雨|阵雨|rain|shower|drizzle|thunder|storm)/i.test(String(text || ''));
-}
-
-function buildQWeatherSource(env) {
-    const location = env.QWEATHER_LOCATION || '';
-    const privateKey = env.QWEATHER_PRIVATE_KEY || env.qweather_key || '';
-    if (!location || !privateKey) return null;
-    return {
-        sourceKey: 'Weather',
-        sourceType: 'weather',
-        location
-    };
-}
-
-async function fetchQWeatherHourlyForecast(env, location) {
-    const apiHost = normalizeApiHost(QWEATHER_API_HOST);
-    if (!apiHost) throw new Error('Missing QWEATHER_API_HOST');
-    const url = new URL('/v7/weather/24h', apiHost);
-    url.searchParams.set('location', location);
-
-    const res = await fetch(url.toString(), {
-        headers: {
-            Authorization: await buildQWeatherAuthorizationHeader(env),
-            Accept: 'application/json'
-        }
-    });
-    const data = await res.json().catch(() => null);
-    if (!res.ok) throw new Error(`QWeather request failed: ${res.status}`);
-    if (!data || data.code !== '200' || !Array.isArray(data.hourly)) {
-        throw new Error(`QWeather response invalid: ${data && data.code ? data.code : 'unknown'}`);
-    }
-    return data;
-}
-
-function buildRainAlertItem(forecast, sourceKey) {
-    const hourly = Array.isArray(forecast.hourly) ? forecast.hourly.slice(0, 6) : [];
-    const rainyHour = hourly.find((hour) => {
-        const precip = Number(hour.precip || 0);
-        const pop = Number(hour.pop || 0);
-        return precip > 0 || (pop > 0 && isRainText(hour.text));
-    });
-    if (!rainyHour) return null;
-
-    const at = formatHourlyForecastTime(rainyHour.fxTime);
-    const details = [
-        rainyHour.text || '',
-        rainyHour.pop ? `PoP ${rainyHour.pop}%` : '',
-        Number(rainyHour.precip || 0) > 0 ? `Precip ${rainyHour.precip} mm` : ''
-    ].filter(Boolean).join(' · ');
-    const summaryText = `${sourceKey} expected by ${at}. ${details}`.trim();
-
-    return {
-        title: sourceKey,
-        description: summaryText,
-        summaryText,
-        summaryHtml: `<p>${escapeHtml(summaryText)}</p>`,
-        link: '',
-        imageUrl: '',
-        itemId: rainyHour.fxTime,
-        publishedAt: rainyHour.fxTime
-    };
-}
-
-function escapeHtml(str) {
-    return (str || '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
-
-function toAbsoluteUrl(url, baseUrl = '') {
-    if (!url) return '';
-    if (url.startsWith('//')) return `https:${url}`;
-    try {
-        return baseUrl ? new URL(url, baseUrl).toString() : new URL(url).toString();
-    } catch {
-        return url;
-    }
-}
-
-function decodeXmlEntities(str) {
-    return (str || '')
-        .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&amp;/g, '&')
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'")
-        .replace(/&#(\d+);/g, (_, code) => {
-            try {
-                return String.fromCodePoint(Number(code));
-            } catch {
-                return _;
-            }
-        })
-        .replace(/&#x([0-9a-f]+);/gi, (_, code) => {
-            try {
-                return String.fromCodePoint(parseInt(code, 16));
-            } catch {
-                return _;
-            }
-        })
-        .trim();
-}
-
-function normalizeMarkupNoise(str) {
-    return (str || '')
-        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-        .replace(/<link[\s\S]*?\/?>/gi, ' ')
-        .replace(/[\u0000-\u001f\u007f]*\s*['"`]*\s*UNIQ--[\w-]+-QINU\s*['"`]*\s*[\u0000-\u001f\u007f]*/g, ' ')
-        .replace(/[\u0000-\u001f\u007f]+/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-}
-
-function stripTags(str) {
-    return normalizeMarkupNoise(
-        decodeXmlEntities((str || '').replace(/<[^>]+>/g, ''))
-    ).trim();
-}
-
-function truncateToSentence(text, maxLength = 180) {
-    const normalized = (text || '').replace(/\s+/g, ' ').trim();
-    if (!normalized || normalized.length <= maxLength) return normalized;
-    const slice = normalized.slice(0, maxLength);
-    const lastSentenceEnd = Math.max(
-        slice.lastIndexOf('. '),
-        slice.lastIndexOf('! '),
-        slice.lastIndexOf('? '),
-        slice.lastIndexOf('。'),
-        slice.lastIndexOf('！'),
-        slice.lastIndexOf('？')
-    );
-    if (lastSentenceEnd >= 20) {
-        return `${slice.slice(0, lastSentenceEnd + 1).trim()}...`;
-    }
-    return `${slice.trim()}...`;
-}
-
-function cleanHistoryBodyText(text) {
-    const cleaned = normalizeNotificationText(
-        normalizeMarkupNoise((text || '').replace(/\s+/g, ' ')).trim()
-    );
-    if (!cleaned) return '';
-    if (/[.!?。！？…]$/.test(cleaned)) return cleaned;
-    return `${cleaned}...`;
-}
-
-function normalizeNotificationText(text) {
-    return (text || '')
-        .replace(/["“”]/g, '')
-        .replace(/\s+([,.;:!?])/g, '$1')
-        .replace(/\(\s+/g, '(')
-        .replace(/\s+\)/g, ')')
-        .replace(/\s+/g, ' ')
-        .trim();
-}
-
-function isSentenceTerminator(text, index) {
-    const ch = text[index];
-    if (!/[.!?。！？]/.test(ch)) return false;
-
-    const prev = index > 0 ? text[index - 1] : '';
-    const next = index + 1 < text.length ? text[index + 1] : '';
-
-    if (ch === '.' && /\d/.test(prev) && /\d/.test(next)) {
-        return false;
+    if (UNWRAP_TAGS.has(tag)) {
+      element.removeAndKeepContent();
+      return;
     }
 
-    return true;
+    // Keep href on <a>; strip every other attribute
+    for (const attr of [...(element.attributes || [])]) {
+      const name = (attr?.name || '').toLowerCase();
+      if (!name) continue;
+      if (tag === 'a' && name === 'href') continue;
+      element.removeAttribute(attr.name);
+    }
+
+    if (tag === 'a') {
+      const href = sanitizeHref(element.getAttribute('href') || '', this.baseUrl);
+      if (href) {
+        element.setAttribute('href', href);
+      } else {
+        element.removeAndKeepContent();
+      }
+    }
+  }
 }
 
+/** HTMLRewriter document handler: strips HTML comments. */
+class SummaryDocumentSanitizer {
+  comments(comment) { comment.remove(); }
+}
+
+/**
+ * Parse raw summary HTML, sanitise it, and optionally truncate to
+ * `maxSentences` (0 = no truncation).
+ */
+async function sanitizeSummaryHtml(rawHtml, fallbackText, baseUrl = '', sourceKey = '', maxSentences = 3) {
+  if (!rawHtml) return fallbackText ? `<p>${escapeHtml(fallbackText)}</p>` : '';
+
+  // Pre-clean: strip control chars & MediaWiki UNIQ markers before parsing
+  const preCleaned = (rawHtml || '')
+    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+    .replace(/\s*['"`]*\s*UNIQ--[\w-]+-QINU\s*['"`]*\s*/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+
+  let safe;
+  try {
+    safe = await new HTMLRewriter()
+      .on('*', new SummaryElementSanitizer(baseUrl))
+      .onDocument(new SummaryDocumentSanitizer())
+      .transform(new Response(preCleaned, { headers: { 'Content-Type': 'text/html; charset=utf-8' } }))
+      .text();
+  } catch { return fallbackText ? `<p>${escapeHtml(fallbackText)}</p>` : ''; }
+
+  safe = safe.trim();
+  if (!safe) return fallbackText ? `<p>${escapeHtml(fallbackText)}</p>` : '';
+
+  // Wikipedia featured-content feeds have structured blurbs that
+  // should be shown in full rather than truncated to N sentences.
+  if (sourceKey === 'on this day' || sourceKey === 'picture of the day' || maxSentences <= 0) return safe;
+
+  return truncateSanitizedHtml(safe, maxSentences) || safe;
+}
+
+/**
+ * Truncate safe HTML after `maxSentences` sentence-ending characters,
+ * closing any open tags.
+ */
 function truncateSanitizedHtml(html, maxSentences) {
-    const source = html || '';
-    let output = '';
-    let sentenceCount = 0;
-    let insideTag = false;
-    const stack = [];
+  let out = '', sentences = 0, inTag = false;
+  const stack = [];
 
-    for (let i = 0; i < source.length; i++) {
-        const ch = source[i];
-        output += ch;
+  for (let i = 0; i < html.length; i++) {
+    const ch = html[i];
+    out += ch;
 
-        if (insideTag) {
-            if (ch === '>') {
-                insideTag = false;
-                const tagText = output.slice(output.lastIndexOf('<') + 1, output.length - 1).trim();
-                if (!tagText || tagText.startsWith('!') || tagText.startsWith('?')) continue;
-                if (tagText.startsWith('/')) {
-                    const closingName = tagText.slice(1).split(/\s+/)[0].toLowerCase();
-                    const idx = stack.lastIndexOf(closingName);
-                    if (idx >= 0) stack.splice(idx, 1);
-                    continue;
-                }
-                const selfClosing = tagText.endsWith('/');
-                const openingName = tagText.replace(/\/$/, '').split(/\s+/)[0].toLowerCase();
-                if (!selfClosing && openingName !== 'br') stack.push(openingName);
-            }
-            continue;
+    if (inTag) {
+      if (ch === '>') {
+        inTag = false;
+        const tagText = out.slice(out.lastIndexOf('<') + 1, out.length - 1).trim();
+        if (!tagText || tagText[0] === '!' || tagText[0] === '?') continue;
+        if (tagText[0] === '/') {
+          const name = tagText.slice(1).split(/\s+/)[0].toLowerCase();
+          const idx = stack.lastIndexOf(name);
+          if (idx >= 0) stack.splice(idx, 1);
+        } else if (!tagText.endsWith('/')) {
+          const name = tagText.replace(/\/$/, '').split(/\s+/)[0].toLowerCase();
+          if (name !== 'br') stack.push(name);
         }
-
-        if (ch === '<') {
-            insideTag = true;
-            continue;
-        }
-
-        if (!isSentenceTerminator(source, i)) continue;
-        sentenceCount += 1;
-        if (sentenceCount < maxSentences) continue;
-
-        while (stack.length) {
-            output += `</${stack.pop()}>`;
-        }
-        return output.trim();
+      }
+      continue;
     }
 
-    return source.trim();
-}
+    if (ch === '<') { inTag = true; continue; }
 
-function asArray(value) {
-    if (value == null) return [];
-    return Array.isArray(value) ? value : [value];
-}
+    // Sentence terminators — skip periods that serve non-sentence roles
+    if (!/[.!?。！？]/.test(ch)) continue;
 
-function isRecord(value) {
-    return !!value && typeof value === 'object' && !Array.isArray(value);
-}
+    if (ch === '.' && i > 0) {
+      const prev = html[i - 1];
+      const next = i + 1 < html.length ? html[i + 1] : '';
 
-function nodeText(value) {
-    if (value == null) return '';
-    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-        return decodeXmlEntities(String(value)).trim();
-    }
-    if (Array.isArray(value)) {
-        return value.map((item) => nodeText(item)).filter(Boolean).join(' ').trim();
-    }
-    if (isRecord(value)) {
-        return decodeXmlEntities(`${value['#text'] || ''}${value.__cdata || ''}`).trim();
-    }
-    return '';
-}
-
-function nodeHtml(value) {
-    if (value == null) return '';
-    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-        return decodeXmlEntities(String(value)).trim();
-    }
-    if (Array.isArray(value)) {
-        return value.map((item) => nodeHtml(item)).filter(Boolean).join('').trim();
-    }
-    if (isRecord(value)) {
-        if (typeof value.__cdata === 'string') {
-            return decodeXmlEntities(value.__cdata).trim();
-        }
-        if (typeof value['#text'] === 'string') {
-            return decodeXmlEntities(value['#text']).trim();
-        }
-    }
-    return '';
-}
-
-function firstMatch(text, patterns) {
-    for (const pattern of patterns) {
-        const match = text.match(pattern);
-        if (match && match[1]) return match[1].trim();
-    }
-    return '';
-}
-
-function extractHtmlAttribute(tag, name) {
-    if (!tag || !name) return '';
-    const match = tag.match(new RegExp(`\\b${name}\\s*=\\s*["']([^"']*)["']`, 'i'));
-    return match ? decodeXmlEntities(match[1]) : '';
-}
-
-function extractPrimaryImage(summaryHtml, baseUrl = '') {
-    const imageTag = summaryHtml.match(/<img\b[^>]*>/i)?.[0] || '';
-    const imageSrc = extractHtmlAttribute(imageTag, 'src');
-    if (imageSrc) {
-        return {
-            imageUrl: toAbsoluteUrl(imageSrc, baseUrl),
-            imageAlt: extractHtmlAttribute(imageTag, 'alt')
-        };
+      // Decimal point (e.g. "3.14")
+      if (/\d/.test(prev) && /\d/.test(next)) continue;
+      // Abbreviation between uppercase letters (e.g. "D.C", "U.S.")
+      if (/[A-Z]/.test(prev) && /[A-Z]/.test(next)) continue;
+      // Abbreviation period then comma (e.g. "D.C.,")
+      if (/[A-Z]/.test(prev) && next === ',') continue;
+      // Ellipsis or consecutive periods (e.g. "...")
+      if (next === '.') continue;
     }
 
-    return {
-        imageUrl: toAbsoluteUrl(firstMatch(summaryHtml, [
-            /<media:content[^>]*url=["']([^"']+)["'][^>]*\/?>/i,
-            /<media:thumbnail[^>]*url=["']([^"']+)["'][^>]*\/?>/i
-        ]), baseUrl),
-        imageAlt: ''
-    };
+    if (++sentences < maxSentences) continue;
+
+    while (stack.length) out += `</${stack.pop()}>`;
+    return out.trim();
+  }
+  return html.trim();
 }
 
-function extractFeedLink(linkNode, baseUrl = '') {
-    for (const link of asArray(linkNode)) {
-        if (isRecord(link)) {
-            const href = nodeText(link.href);
-            const rel = nodeText(link.rel).toLowerCase();
-            if (href && (!rel || rel === 'alternate')) return toAbsoluteUrl(href, baseUrl);
-        } else {
-            const href = nodeText(link);
-            if (href) return toAbsoluteUrl(href, baseUrl);
-        }
+// ---------------------------------------------------------------------------
+// RSS / Atom feed parsing (fast-xml-parser)
+// ---------------------------------------------------------------------------
+const asArray = v => (v == null ? [] : Array.isArray(v) ? v : [v]);
+
+/** Extract text from a fast-xml-parser node (handles #text, __cdata, arrays). */
+function xmlText(node) {
+  if (node == null) return '';
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(xmlText).filter(Boolean).join(' ').trim();
+  if (typeof node === 'object') return String(node['#text'] || node.__cdata || '').trim();
+  return '';
+}
+
+/** Decode common XML/HTML entities and numeric character references. */
+function decodeXmlEntities(str) {
+  return (str || '').replace(/&(?:amp|lt|gt|quot|#39|#(\d+)|#x([0-9a-f]+));/gi, (m, d, h) => {
+    if (m === '&amp;') return '&';
+    if (m === '&lt;') return '<';
+    if (m === '&gt;') return '>';
+    if (m === '&quot;') return '"';
+    if (m === '&#39;') return "'";
+    if (d) return String.fromCodePoint(Number(d));
+    if (h) return String.fromCodePoint(parseInt(h, 16));
+    return m;
+  });
+}
+
+/** Extract raw HTML from a fast-xml-parser node, decoding XML entities. */
+function xmlHtml(node) {
+  if (node == null) return '';
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(xmlHtml).filter(Boolean).join('');
+  if (typeof node === 'object') {
+    if (typeof node.__cdata === 'string') return node.__cdata;
+    if (typeof node['#text'] === 'string') return decodeXmlEntities(node['#text']);
+  }
+  return '';
+}
+
+/** Resolve the best link from an Atom/RSS <link> node. */
+function resolveFeedLink(linkNode, baseUrl = '') {
+  for (const link of asArray(linkNode)) {
+    if (typeof link === 'object' && link.href) {
+      const href = xmlText(link.href), rel = (xmlText(link.rel) || '').toLowerCase();
+      if (href && (!rel || rel === 'alternate')) return toAbsoluteUrl(href, baseUrl);
+    } else {
+      const href = xmlText(link);
+      if (href) return toAbsoluteUrl(href, baseUrl);
     }
-    return '';
+  }
+  return '';
 }
 
-async function parseFeedItemNode(itemNode, feedMeta) {
-    const { baseUrl = '', source = null } = feedMeta || {};
-    const title = stripTags(nodeText(itemNode.title));
-    const link = extractFeedLink(itemNode.link, baseUrl) || toAbsoluteUrl(nodeText(itemNode.link), baseUrl);
-    const itemId = nodeText(itemNode.id || itemNode.guid) || link;
-    const publishedAt = nodeText(itemNode.updated || itemNode.published || itemNode.pubDate);
-    const rawSummaryHtml = nodeHtml(itemNode.summary || itemNode.content || itemNode.description);
-    const description = truncateToSentence(stripTags(rawSummaryHtml), 180);
-    const { imageUrl, imageAlt } = extractPrimaryImage(rawSummaryHtml, baseUrl || link);
-    const summaryHtml = await sanitizeSummaryHtml(rawSummaryHtml, description, baseUrl || link, source);
-
-    return { title, link, description, summaryText: description, summaryHtml, imageUrl, imageAlt, itemId, publishedAt };
+/** Extract the first <img> src from an HTML snippet using regex. */
+function extractFirstImageSrc(html, baseUrl = '') {
+  if (!html) return '';
+  const imgMatch = html.match(/<img[^>]+src=["']([^"']+)["'][^>]*>/i);
+  if (imgMatch) return toAbsoluteUrl(imgMatch[1], baseUrl);
+  const m = html.match(/<media:(content|thumbnail)[^>]*url=["']([^"']+)["'][^>]*\/?>/i);
+  return m ? toAbsoluteUrl(m[2], baseUrl) : '';
 }
 
+/** Parse one <entry> / <item> node into a plain object. */
+async function parseFeedItem(itemNode, feedBaseUrl, source) {
+  const isIthome = (source?.sourceKey || '').toLowerCase() === 'ithome';
+  const title = xmlText(itemNode.title).replace(/<[^>]+>/g, '').trim();
+  const link = resolveFeedLink(itemNode.link, feedBaseUrl) || toAbsoluteUrl(xmlText(itemNode.link), feedBaseUrl);
+  const itemId = xmlText(itemNode.id || itemNode.guid) || link;
+  const publishedAt = xmlText(itemNode.updated || itemNode.published || itemNode.pubDate);
+  const rawHtml = isIthome ? '' : xmlHtml(itemNode.summary || itemNode.content || itemNode.description);
+  const imageUrl = extractFirstImageSrc(rawHtml, feedBaseUrl || link);
+  const description = isIthome ? title : truncateToSentence(rawHtml.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim(), 180);
+  const summaryHtml = isIthome ? '' : await sanitizeSummaryHtml(rawHtml, description, feedBaseUrl || link, source?.sourceKey);
+
+  return { title, link, description, summaryText: description, summaryHtml, imageUrl, itemId, publishedAt };
+}
+
+/** Parse a complete RSS/Atom feed text, return items sorted oldest-first. */
 async function parseFeedItems(feedText, source = null) {
-    const parsed = FEED_XML_PARSER.parse(feedText);
-    const feedRoot = parsed.feed || parsed.rss?.channel || null;
-    if (!feedRoot) return null;
+  const parsed = FEED_XML_PARSER.parse(feedText);
+  const root = parsed.feed || parsed.rss?.channel;
+  if (!root) return null;
 
-    const feedMeta = {
-        baseUrl: extractFeedLink(feedRoot.link || feedRoot.atomLink, ''),
-        source
-    };
-    const rawItems = feedRoot.entry || feedRoot.item || [];
-    const parsedItems = (await Promise.all(asArray(rawItems).map((itemNode) => parseFeedItemNode(itemNode, feedMeta))))
-        .filter((item) => item && item.title);
+  const baseUrl = resolveFeedLink(root.link || root.atomLink);
+  const rawItems = root.entry || root.item || [];
+  const items = (await Promise.all(asArray(rawItems).map(n => parseFeedItem(n, baseUrl, source))))
+    .filter(it => it && it.title);
 
-    if (parsedItems.length === 0) return null;
-
-    parsedItems.sort((a, b) => {
-        const aTime = Date.parse(a.publishedAt || 0);
-        const bTime = Date.parse(b.publishedAt || 0);
-        return aTime - bTime;
-    });
-    return parsedItems;
+  if (!items.length) return null;
+  items.sort((a, b) => (Date.parse(a.publishedAt || 0)) - (Date.parse(b.publishedAt || 0)));
+  return items;
 }
 
 async function parseLatestFeedItem(feedText, source = null) {
-    const items = await parseFeedItems(feedText, source);
-    return items?.at(-1) || null;
+  const items = await parseFeedItems(feedText, source);
+  return items?.at(-1) || null;
 }
 
-function sanitizeSummaryHref(href, baseUrl = '') {
-    const resolved = toAbsoluteUrl(href || '', baseUrl);
-    try {
-        const url = new URL(resolved);
-        if (url.protocol === 'http:' || url.protocol === 'https:') return url.toString();
-    } catch {
-    }
-    return '';
-}
+// ---------------------------------------------------------------------------
+// Notification building
+// ---------------------------------------------------------------------------
+function buildNotificationText(item) {
+  const html = item.summaryHtml || '';
+  const sourceKey = (item.sourceKey || '').toLowerCase();
 
-class SummaryElementSanitizer {
-    constructor(baseUrl, source = null) {
-        this.baseUrl = baseUrl;
-        this.allowedTags = new Set(BASE_ALLOWED_SUMMARY_TAGS);
-    }
-
-    element(element) {
-        const rawTag = typeof element.tagName === 'string' ? element.tagName : '';
-        if (!rawTag) return;
-        const tag = rawTag.toLowerCase();
-        if (tag === 'summary-root') return;
-        if (DROP_SUMMARY_TAGS.has(tag)) {
-            element.remove();
-            return;
-        }
-        if (!this.allowedTags.has(tag)) {
-            element.removeAndKeepContent();
-            return;
-        }
-
-        for (const attr of Array.from(element.attributes || [])) {
-            const rawName = typeof attr?.name === 'string' ? attr.name : '';
-            if (!rawName) continue;
-            const name = rawName.toLowerCase();
-            if (tag === 'a' && name === 'href') continue;
-            element.removeAttribute(rawName);
-        }
-
-        if (tag === 'a') {
-            const href = sanitizeSummaryHref(element.getAttribute('href') || '', this.baseUrl);
-            if (href) {
-                element.setAttribute('href', href);
-            } else {
-                element.removeAndKeepContent();
-            }
-        }
-    }
-}
-
-class SummaryDocumentSanitizer {
-    comments(comment) {
-        comment.remove();
-    }
-}
-
-async function sanitizeSummaryHtml(summaryHtml, summaryText, baseUrl = '', source = null) {
-    if (!summaryHtml) return summaryText ? `<p>${escapeHtml(summaryText)}</p>` : '';
-    const wrapped = `<summary-root>${normalizeMarkupNoise(summaryHtml)}</summary-root>`;
-    const rewritten = await new HTMLRewriter()
-        .on('*', new SummaryElementSanitizer(baseUrl, source))
-        .onDocument(new SummaryDocumentSanitizer())
-        .transform(new Response(wrapped, {
-            headers: { 'Content-Type': 'text/html; charset=utf-8' }
-        }))
-        .text();
-    const sanitized = rewritten
-        .replace(/^<summary-root>/i, '')
-        .replace(/<\/summary-root>$/i, '')
-        .trim();
-    if ((source?.sourceKey || '') === 'on this day') {
-        return sanitized || (summaryText ? `<p>${escapeHtml(summaryText)}</p>` : '');
-    }
-    const truncated = truncateSanitizedHtml(sanitized, 3);
-    return truncated || (summaryText ? `<p>${escapeHtml(summaryText)}</p>` : '');
-}
-
-function buildNotificationText(historyItem, fallbackText = '') {
-    const rawHtml = historyItem.summaryHtml || '';
-    const text = (historyItem?.sourceKey || '') === 'on this day'
-        ? extractOnThisDayNotificationText(rawHtml)
-        : extractListNotificationText(rawHtml);
-
-    const normalized = truncateToSentence(
-        normalizeNotificationText(text || fallbackText || ''),
-        180
-    );
-    return normalized || fallbackText || 'New item';
-}
-
-function extractListNotificationText(html) {
-    const liMatches = [...(html || '').matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)];
-    if (liMatches.length > 0) {
-        return liMatches.map(m => stripTags(m[1])).join(' · ');
-    }
-    return stripTags(html);
-}
-
-function extractOnThisDayNotificationText(html) {
-    const pMatch = (html || '').match(/<p\b[^>]*>([\s\S]*?)<\/p>/i);
-    const firstUlMatch = (html || '').match(/<ul\b[^>]*>([\s\S]*?)<\/ul>/i);
-
+  let text = '';
+  if (sourceKey === 'on this day') {
+    const pMatch = html.match(/<p\b[^>]*>([\s\S]*?)<\/p>/i);
+    const ulMatch = html.match(/<ul\b[^>]*>([\s\S]*?)<\/ul>/i);
     const parts = [];
-    if (pMatch) parts.push(stripTags(pMatch[1]));
-    if (firstUlMatch) {
-        const liTexts = [];
-        for (const m of firstUlMatch[1].matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)) {
-            liTexts.push(stripTags(m[1]));
-        }
-        parts.push(liTexts.join(' · '));
+    if (pMatch) parts.push(pMatch[1].replace(/<[^>]+>/g, '').trim());
+    if (ulMatch) {
+      const lis = [...ulMatch[1].matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)].map(m => m[1].replace(/<[^>]+>/g, '').trim());
+      if (lis.length) parts.push(lis.join(' · '));
     }
+    text = parts.join(' ') || html.replace(/<[^>]+>/g, '').trim();
+  } else {
+    const lis = [...html.matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)].map(m => m[1].replace(/<[^>]+>/g, '').trim());
+    text = lis.length ? lis.join(' · ') : html.replace(/<[^>]+>/g, '').trim();
+  }
 
-    return parts.join(' ') || stripTags(html);
+  text = text.replace(/["""]/g, '').replace(/\s+([,.;:!?])/g, '$1')
+    .replace(/\(\s+/g, '(').replace(/\s+\)/g, ')').replace(/\s+/g, ' ').trim();
+
+  return truncateToSentence(text, 10);
 }
 
 function buildNotificationPayload(historyItem) {
-    const sourceName = getSourceDisplayName(historyItem.sourceKey);
-    const title = sourceName
-        ? `${sourceName}: ${historyItem.title || historyItem.sourceKey || 'Notification'}`
-        : historyItem.title || historyItem.sourceKey || 'Notification';
+  const display = SOURCE_DISPLAY_NAMES[(historyItem.sourceKey || '').toLowerCase()] || '';
+  const title = display
+    ? `${display} ${historyItem.title || historyItem.sourceKey || 'Notification'}`
+    : (historyItem.title || historyItem.sourceKey || 'Notification');
 
-    const notification = {
-        title,
-        body: historyItem.notificationText || 'New item',
-        silent: false,
-        app_badge: '1'
-    };
-    if (historyItem.link) notification.navigate = historyItem.link;
-    return {
-        web_push: 8030,
-        notification
-    };
+  return {
+    web_push: 8030,
+    notification: {
+      title,
+      body: historyItem.notificationText,
+      silent: false,
+      app_badge: '1',
+      ...(historyItem.link ? { navigate: historyItem.link } : {})
+    }
+  };
 }
 
-function getSourceDisplayName(sourceKey) {
-    const names = {
-        'picture of today': '[POTD]',
-        'on this day': '[OTD]',
-        'do you know': '[DYK]',
-        'sspai': '[sspai]',
-        'ithome': '[IThome]',
-        'weather': '[Weather]'
-    };
-    return names[(sourceKey || '').toLowerCase()] || '';
+// ---------------------------------------------------------------------------
+// State management (KV)
+// ---------------------------------------------------------------------------
+async function getStateJson(env, key) {
+  const raw = await env.SUBS.get(key);
+  return raw ? JSON.parse(raw) : null;
 }
+async function putStateJson(env, key, value) { await env.SUBS.put(key, JSON.stringify(value)); }
 
-function getSourceCurrentKey(sourceKey) {
-    return `source:current:${sourceKey}`;
-}
-
-function getSourceLastItemKey(sourceKey) {
-    return `source:last:${sourceKey}`;
-}
+const sourceLastKey = sk => `pointer:${sk}`;
 
 function deriveItemKey(item) {
-    return item.itemId || item.link || `${item.title}::${item.publishedAt || item.updatedAt || ''}`;
-}
-
-function getScheduledFeedConfig(feedUrl) {
-    return DEFAULT_RSS_SOURCES.find((feed) => feed.feedUrl === feedUrl) || null;
+  return item.itemId || item.link || `${item.title}::${item.publishedAt || ''}`;
 }
 
 function getSourceConfig(sourceKey) {
-    return DEFAULT_RSS_SOURCES.find((feed) => feed.sourceKey === sourceKey) || null;
+  return DEFAULT_RSS_SOURCES.find(f => f.sourceKey === sourceKey) || null;
 }
 
-function getFeedItemKey(item) {
-    return deriveItemKey(item);
+async function appendHistoryItem(env, item) {
+  const now = Date.now();
+  const history = ((await getStateJson(env, HISTORY_KEY)) || [])
+    .filter(it => it && it.createdAt && (now - Date.parse(it.createdAt)) <= HISTORY_RETENTION_MS);
+  const next = [item, ...history.filter(it => it.id !== item.id)]
+    .sort((a, b) => (Date.parse(b.createdAt || 0)) - (Date.parse(a.createdAt || 0)))
+    .slice(0, HISTORY_LIMIT);
+  await putStateJson(env, HISTORY_KEY, next);
+  return next;
 }
 
-function getUnseenFeedItems(items, lastItemKey = '') {
-    const sortedItems = asArray(items).filter(Boolean);
-    if (sortedItems.length === 0) return [];
+// ---------------------------------------------------------------------------
+// Feed processing
+// ---------------------------------------------------------------------------
 
-    if (!lastItemKey) return sortedItems;
-
-    const lastIndex = sortedItems.findIndex((item) => getFeedItemKey(item) === lastItemKey);
-    if (lastIndex < 0) return sortedItems;
-
-    return sortedItems.slice(lastIndex + 1);
+/** Return items in `items` that appear after `lastKey` (by item key equality). */
+function getUnseenItems(items, lastKey = '') {
+  if (!lastKey) return asArray(items).filter(Boolean);
+  const sorted = asArray(items).filter(Boolean);
+  const idx = sorted.findIndex(it => deriveItemKey(it) === lastKey);
+  return idx < 0 ? sorted : sorted.slice(idx + 1);
 }
 
+/** Check excludeKeywords – return true if item should be silently dropped. */
 function shouldDiscardItem(sourceKey, item) {
-    const config = getSourceConfig(sourceKey);
-    if (!config) return false;
-
-    const { excludeKeywords } = config;
-    const text = [item.title, item.summaryText, item.description].filter(Boolean).join(' ').toLowerCase();
-
-    // Discard (return true) if any excludeKeyword matches
-    if (Array.isArray(excludeKeywords) && excludeKeywords.length > 0) {
-        if (excludeKeywords.some((kw) => text.includes(kw.toLowerCase()))) {
-            return true;
-        }
-    }
-
-    return false;
+  const cfg = getSourceConfig(sourceKey);
+  if (!cfg || !Array.isArray(cfg.excludeKeywords) || !cfg.excludeKeywords.length) return false;
+  const text = [item.title, item.summaryText, item.description].filter(Boolean).join(' ').toLowerCase();
+  return cfg.excludeKeywords.some(kw => text.includes(kw.toLowerCase()));
 }
 
+/** Check includeKeywords – return true if item is allowed to trigger a notification. */
 function matchesFeedFilter(sourceKey, item) {
-    const config = getSourceConfig(sourceKey);
-    if (!config) return true;
-
-    const { includeKeywords } = config;
-    const text = [item.title, item.summaryText, item.description].filter(Boolean).join(' ').toLowerCase();
-
-    // If includeKeywords is declared for a source, treat it as a strict allow-list for notifications.
-    // That means an empty includeKeywords array intentionally matches nothing (no notifications).
-    if (Array.isArray(includeKeywords)) {
-        if (includeKeywords.length === 0) return false;
-        if (!includeKeywords.some((kw) => text.includes(kw.toLowerCase()))) {
-            return false;
-        }
-    }
-
-    return true;
+  const cfg = getSourceConfig(sourceKey);
+  if (!cfg || !Array.isArray(cfg.includeKeywords) || !cfg.includeKeywords.length) return true;
+  const text = [item.title, item.summaryText, item.description].filter(Boolean).join(' ').toLowerCase();
+  return cfg.includeKeywords.some(kw => text.includes(kw.toLowerCase()));
 }
 
-async function getStateJson(env, key) {
-    const raw = await env.SUBS.get(key);
-    if (!raw) return null;
-    return JSON.parse(raw);
+/**
+ * Process a single item for a source: deduplicate, filter, persist to history,
+ * optionally send notification, and advance the "last seen" cursor.
+ */
+async function processSourceItem(env, source, item, opts = {}) {
+  const { updateLastSeen = true } = opts;
+  const key = deriveItemKey(item);
+  if (!key) return { skipped: true, reason: 'missing_key', sourceKey: source.sourceKey };
+
+  const lastKey = await env.SUBS.get(sourceLastKey(source.sourceKey));
+  if (lastKey === key) return { skipped: true, reason: 'duplicate', sourceKey: source.sourceKey, itemKey: key };
+
+  if (shouldDiscardItem(source.sourceKey, item)) {
+    if (updateLastSeen) await env.SUBS.put(sourceLastKey(source.sourceKey), key);
+    return { skipped: true, reason: 'excluded', sourceKey: source.sourceKey, itemKey: key };
+  }
+
+  const historyItem = {
+    id: `${source.sourceKey}:${key}`,
+    sourceKey: source.sourceKey,
+    title: item.title || '',
+    summaryHtml: item.summaryHtml || '',
+    link: item.link || '',
+    imageUrl: item.imageUrl || '',
+    publishedAt: item.publishedAt || '',
+    createdAt: new Date().toISOString()
+  };
+  historyItem.notificationText = buildNotificationText(historyItem);
+  await appendHistoryItem(env, historyItem);
+
+  if (!matchesFeedFilter(source.sourceKey, item)) {
+    if (updateLastSeen) await env.SUBS.put(sourceLastKey(source.sourceKey), key);
+    return { skipped: true, reason: 'filtered', sourceKey: source.sourceKey, itemKey: key };
+  }
+
+  const result = await sendToAllSubscriptions(env, buildNotificationPayload(historyItem));
+  if (updateLastSeen) await env.SUBS.put(sourceLastKey(source.sourceKey), key);
+  return { skipped: false, sourceKey: source.sourceKey, itemKey: key, ...result };
 }
 
-async function putStateJson(env, key, value) {
-    await env.SUBS.put(key, JSON.stringify(value));
+/** Process a batch of feed items (oldest first). */
+async function processFeedItems(env, source, items, opts = {}) {
+  const lastKey = opts.lastItemKey || await env.SUBS.get(sourceLastKey(source.sourceKey)) || '';
+  const unseen = getUnseenItems(items, lastKey);
+  const results = { sourceKey: source.sourceKey, total: unseen.length, processed: 0, skipped: 0, sent: 0, failed: 0, errors: [] };
+
+  for (const item of unseen) {
+    const r = await processSourceItem(env, source, item, opts);
+    if (r.skipped) { results.skipped++; continue; }
+    results.processed++;
+    results.sent += r.sent || 0;
+    results.failed += r.failed || 0;
+    if (r.errors?.length) results.errors.push(...r.errors);
+    if ((r.failed || 0) > 0) break;
+  }
+  return results;
 }
 
-async function appendHistoryItem(env, historyItem) {
-    const now = Date.now();
-    const history = (await getStateJson(env, HISTORY_KEY) || []).filter((item) => {
-        const createdAt = item && item.createdAt ? Date.parse(item.createdAt) : 0;
-        return createdAt && (now - createdAt) <= HISTORY_RETENTION_MS;
-    });
-    const next = [historyItem, ...history.filter(item => item.id !== historyItem.id)]
-        .sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0))
-        .slice(0, HISTORY_LIMIT);
-    await putStateJson(env, HISTORY_KEY, next);
-    return next;
+/** Fetch & parse a feed URL, then process all unseen items. */
+async function processFetchedFeedText(env, source, feedText, opts = {}) {
+  const items = await parseFeedItems(feedText, source);
+  if (!items?.length) return { skipped: true, reason: 'no_items', sourceKey: source.sourceKey };
+  return processFeedItems(env, source, items, opts);
 }
 
-async function refreshScheduledRssFeedState(env, feedConfig) {
-    const { feedUrl } = feedConfig;
-    const preview = await fetchFeedPreview(feedUrl);
-    if (preview.status < 200 || preview.status >= 300) {
-        throw new Error(`Scheduled feed fetch failed: ${preview.status}`);
-    }
-
-    const item = await parseLatestFeedItem(preview.text, feedConfig);
-    if (!item) throw new Error('Unable to parse scheduled feed');
-    item.date = (item.publishedAt || '').slice(0, 10);
-
-    const sourceKey = feedConfig.sourceKey;
-    const current = await getStateJson(env, getSourceCurrentKey(sourceKey));
-    const changed = !current ||
-        current.date !== item.date ||
-        current.title !== item.title ||
-        current.link !== item.link ||
-        current.summaryText !== item.summaryText ||
-        current.imageUrl !== item.imageUrl ||
-        current.imageAlt !== item.imageAlt;
-
-    if (changed) {
-        await putStateJson(env, getSourceCurrentKey(sourceKey), item);
-    }
-
-    return { item, changed };
+/** Fetch a feed URL and return status + text preview. */
+async function fetchFeedPreview(feedUrl) {
+  const res = await fetch(feedUrl, {
+    headers: { 'User-Agent': 'Attention-Worker/1.0', Accept: 'application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.1' }
+  });
+  const text = await res.text();
+  return { status: res.status, contentType: res.headers.get('content-type') || '', text };
 }
 
-async function processSourceItem(env, source, item, options = {}) {
-    const { cacheCurrent = true, updateLastSeen = true } = options;
-    const itemKey = deriveItemKey(item);
-    if (!itemKey) return { skipped: true, reason: 'missing_item_key', sourceKey: source.sourceKey };
-
-    if (cacheCurrent) {
-        await putStateJson(env, getSourceCurrentKey(source.sourceKey), item);
-    }
-
-    const lastItemKey = await env.SUBS.get(getSourceLastItemKey(source.sourceKey));
-    if (lastItemKey === itemKey) {
-        return { skipped: true, reason: 'duplicate', sourceKey: source.sourceKey, itemKey };
-    }
-
-    // Check if item should be discarded entirely (excludeKeywords match)
-    // If discarded, still advance cursor so we don't re-fetch it forever
-    if (shouldDiscardItem(source.sourceKey, item)) {
-        if (updateLastSeen) {
-            await env.SUBS.put(getSourceLastItemKey(source.sourceKey), itemKey);
-        }
-        return { skipped: true, reason: 'excluded', sourceKey: source.sourceKey, itemKey };
-    }
-
-    // Item passes exclude filter; always ingest and save to history
-    const historyItem = {
-        id: `${source.sourceKey}:${itemKey}`,
-        sourceKey: source.sourceKey,
-        // lang: source.lang || '',
-        title: item.title || '',
-        summaryHtml: item.summaryHtml || '',
-        link: item.link || '',
-        imageUrl: item.imageUrl || '',
-        imageAlt: item.imageAlt || '',
-        publishedAt: item.publishedAt || item.updatedAt || '',
-        createdAt: new Date().toISOString()
-    };
-    historyItem.notificationText = buildNotificationText(historyItem, item.summaryText || item.description || '');
-    await appendHistoryItem(env, historyItem);
-
-    // Check if item should trigger a notification (includeKeywords gate)
-    const shouldNotify = matchesFeedFilter(source.sourceKey, item);
-    if (!shouldNotify) {
-        // Item ingested but not notified; still advance cursor
-        if (updateLastSeen) {
-            await env.SUBS.put(getSourceLastItemKey(source.sourceKey), itemKey);
-        }
-        return { skipped: true, reason: 'filtered_from_notification', sourceKey: source.sourceKey, itemKey };
-    }
-
-    // Item passes both filters; send notification
-    const result = await sendToAllSubscriptions(env, buildNotificationPayload(historyItem));
-    if (updateLastSeen) {
-        await env.SUBS.put(getSourceLastItemKey(source.sourceKey), itemKey);
-    }
-    return {
-        skipped: false,
-        sourceKey: source.sourceKey,
-        item,
-        itemKey,
-        ...result
-    };
+// ---------------------------------------------------------------------------
+// QWeather
+// ---------------------------------------------------------------------------
+function normalizeApiHost(host) {
+  if (!host) return '';
+  return /^https?:\/\//i.test(host) ? host.replace(/\/+$/g, '') : `https://${host.replace(/\/+$/g, '')}`;
 }
 
-async function processFeedItems(env, source, items, options = {}) {
-    const feedItems = getUnseenFeedItems(items, options.lastItemKey || '');
-    const results = {
-        sourceKey: source.sourceKey,
-        total: feedItems.length,
-        processed: 0,
-        skipped: 0,
-        sent: 0,
-        failed: 0,
-        errors: [],
-        stoppedOnError: false,
-        items: []
-    };
-
-    for (const item of feedItems) {
-        const result = await processSourceItem(env, source, item, options);
-        results.items.push(result);
-        if (result.skipped) {
-            results.skipped += 1;
-        } else {
-            results.processed += 1;
-            results.sent += result.sent || 0;
-            results.failed += result.failed || 0;
-            if (Array.isArray(result.errors)) {
-                results.errors.push(...result.errors);
-            }
-            if ((result.failed || 0) > 0) {
-                results.stoppedOnError = true;
-                break;
-            }
-        }
-    }
-
-    return results;
+function buildQWeatherSource(env) {
+  const location = env.QWEATHER_LOCATION || '';
+  const privateKey = env.QWEATHER_PRIVATE_KEY || env.qweather_key || '';
+  if (!location || !privateKey) return null;
+  return { sourceKey: 'Weather', sourceType: 'weather', location };
 }
 
-async function processFetchedFeedText(env, source, feedText, options = {}) {
-    const items = await parseFeedItems(feedText, source);
-    if (!items || items.length === 0) {
-        return { skipped: true, reason: 'unable_to_parse_feed_item', sourceKey: source.sourceKey };
-    }
+async function fetchQWeatherHourlyForecast(env, location) {
+  const apiHost = normalizeApiHost(QWEATHER_API_HOST);
+  const url = new URL('/v7/weather/24h', apiHost);
+  url.searchParams.set('location', location);
+  const res = await fetch(url.toString(), { headers: { Authorization: await buildQWeatherAuthorizationHeader(env), Accept: 'application/json' } });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(`QWeather request failed: ${res.status}`);
+  if (!data || data.code !== '200' || !Array.isArray(data.hourly)) throw new Error(`QWeather response invalid: ${data?.code || 'unknown'}`);
+  return data;
+}
 
-    return processFeedItems(env, source, items, options);
+function buildRainAlertItem(forecast) {
+  const hourly = (forecast.hourly || []).slice(0, 6);
+  const rainy = hourly.find(h => {
+    const precip = Number(h.precip || 0), pop = Number(h.pop || 0);
+    return precip > 0 || (pop > 0 && /(雨|雷阵雨|阵雨|rain|shower|drizzle|thunder|storm)/i.test(String(h.text || '')));
+  });
+  if (!rainy) return null;
+
+  let fxTime;
+  try {
+    fxTime = new Intl.DateTimeFormat('en-GB', { timeZone: SHANGHAI_TZ, hour: '2-digit', minute: '2-digit', hour12: false, month: 'numeric', day: 'numeric' })
+      .format(new Date(rainy.fxTime));
+  } catch { fxTime = rainy.fxTime || ''; }
+
+  const details = [rainy.text, rainy.pop ? `PoP ${rainy.pop}%` : '', Number(rainy.precip || 0) > 0 ? `Precip ${rainy.precip} mm` : ''].filter(Boolean).join(' · ');
+  const summary = `Weather expected by ${fxTime}. ${details}`.trim();
+
+  return { title: 'Weather', description: summary, summaryText: summary, summaryHtml: `<p>${escapeHtml(summary)}</p>`,
+    link: '', imageUrl: '', itemId: rainy.fxTime, publishedAt: rainy.fxTime };
 }
 
 async function processQWeatherRainAlert(env) {
-    const source = buildQWeatherSource(env);
-    if (!source) return { skipped: true, reason: 'missing_qweather_location' };
-    const forecast = await fetchQWeatherHourlyForecast(env, source.location);
-    const item = buildRainAlertItem(forecast, source.sourceKey);
-    if (!item) return { skipped: true, reason: 'no_rain_within_6h', sourceKey: source.sourceKey };
-    return processSourceItem(env, source, item, { cacheCurrent: false });
+  const source = buildQWeatherSource(env);
+  if (!source) return { skipped: true, reason: 'missing_qweather_location' };
+  const forecast = await fetchQWeatherHourlyForecast(env, source.location);
+  const item = buildRainAlertItem(forecast);
+  if (!item) return { skipped: true, reason: 'no_rain_6h', sourceKey: source.sourceKey };
+  return processSourceItem(env, source, item, { updateLastSeen: true });
 }
 
+// ---------------------------------------------------------------------------
+// Subscription management
+// ---------------------------------------------------------------------------
 async function listSubscriptions(env) {
-    const out = [];
-    let cursor = undefined;
-    for (; ;) {
-        const page = await env.SUBS.list({ cursor, limit: 1000 });
-        for (const key of page.keys || []) {
-            if (!/^[0-9a-f]{64}$/i.test(key.name)) continue;
-            const stored = await env.SUBS.get(key.name);
-            if (!stored) continue;
-            try {
-                const parsed = JSON.parse(stored);
-                const plain = await aesGcmDecrypt(env.SUBS_ENC_KEY, parsed.iv, parsed.ct);
-                const sub = JSON.parse(plain).sub;
-                if (sub && sub.endpoint) out.push(sub);
-            } catch (e) {
-            }
-        }
-        if (!page.list_complete) {
-            cursor = page.cursor;
-            continue;
-        }
-        return out;
+  const out = [];
+  let cursor;
+  for (;;) {
+    const page = await env.SUBS.list({ cursor, limit: 1000 });
+    for (const key of page.keys || []) {
+      if (!/^[0-9a-f]{64}$/i.test(key.name)) continue;
+      const stored = await env.SUBS.get(key.name);
+      if (!stored) continue;
+      try {
+        const { iv, ct } = JSON.parse(stored);
+        const plain = await aesGcmDecrypt(env.SUBS_ENC_KEY, iv, ct);
+        const sub = JSON.parse(plain).sub;
+        if (sub?.endpoint) out.push(sub);
+      } catch { /* skip corrupt entries */ }
     }
+    if (!page.list_complete) { cursor = page.cursor; continue; }
+    return out;
+  }
 }
 
 async function sendToAllSubscriptions(env, payload) {
-    const subscriptions = await listSubscriptions(env);
-    const results = { total: subscriptions.length, sent: 0, failed: 0, errors: [] };
-    for (const subscription of subscriptions) {
-        try {
-            await sendNotification(subscription, JSON.stringify(payload));
-            results.sent += 1;
-        } catch (e) {
-            results.failed += 1;
-            results.errors.push({
-                endpoint: subscription.endpoint,
-                error: String(e && e.message ? e.message : e)
-            });
-        }
-    }
-    return results;
+  const subs = await listSubscriptions(env);
+  const results = { total: subs.length, sent: 0, failed: 0, errors: [] };
+  for (const sub of subs) {
+    try { await sendNotification(sub, JSON.stringify(payload)); results.sent++; }
+    catch (e) { results.failed++; results.errors.push({ endpoint: sub.endpoint, error: e?.message || String(e) }); }
+  }
+  return results;
 }
 
-async function handleWebSubDelivery(env, rawBody, fallbackUrl = '') {
-    const text = new TextDecoder().decode(rawBody);
-    const source = {
-        sourceKey: fallbackUrl ? `websub:${fallbackUrl}` : 'websub:unknown',
-        sourceType: 'websub'
-    };
-    return processFetchedFeedText(env, source, text, { cacheCurrent: false });
+// ---------------------------------------------------------------------------
+// WebSub / Webhook verification
+// ---------------------------------------------------------------------------
+async function verifyWebhookSignature(request, rawBody, secret) {
+  if (!secret) return true;
+  const sig256 = request.headers.get('x-hub-signature-256') || request.headers.get('x-signature-sha256') || '';
+  const sig1 = request.headers.get('x-hub-signature') || request.headers.get('x-signature-sha1') || '';
+
+  if (sig256.startsWith('sha256=')) {
+    const expected = await hmacHex(secret, rawBody, 'SHA-256');
+    return safeEqual(`sha256=${expected}`, sig256);
+  }
+  if (sig1.startsWith('sha1=')) {
+    const expected = await hmacHex(secret, rawBody, 'SHA-1');
+    return safeEqual(`sha1=${expected}`, sig1);
+  }
+  return false;
 }
 
-async function handleWebhookDelivery(env, rawBody, contentType = '') {
-    if (!contentType.includes('application/json')) return { ok: false, reason: 'unsupported_content_type' };
-    const body = JSON.parse(new TextDecoder().decode(rawBody));
-    if (!body || !body.title) return { ok: false, reason: 'missing_title' };
-    const item = {
-        title: body.title,
-        description: body.body || '',
-        summaryText: body.body || '',
-        summaryHtml: body.bodyHtml || '',
-        link: body.link || '',
-        imageUrl: body.imageUrl || '',
-        itemId: body.itemKey || body.id || body.link || '',
-        publishedAt: body.publishedAt || new Date().toISOString()
-    };
-    return processSourceItem(env, {
-        sourceKey: body.sourceKey || 'webhook:default',
-        sourceType: 'webhook'
-    }, item, { cacheCurrent: false });
-}
-
+// ---------------------------------------------------------------------------
+// Response helper
+// ---------------------------------------------------------------------------
 function json(data, status = 200, extraHeaders = {}) {
-    return new Response(JSON.stringify(data), {
-        status,
-        headers: {
-            'Content-Type': 'application/json; charset=utf-8',
-            'Cache-Control': 'no-store',
-            ...extraHeaders
-        }
-    });
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...extraHeaders }
+  });
 }
 
+// ---------------------------------------------------------------------------
+// Main export
+// ---------------------------------------------------------------------------
 export default {
-    async fetch(request, env, ctx) {
-        const url = new URL(request.url);
-        const allowedOrigins = splitCsv(env.ALLOWED_ORIGINS);
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    const allowedOrigins = splitCsv(env.ALLOWED_ORIGINS);
 
-        if (request.method === 'OPTIONS') {
-            return new Response(null, {
-                status: 204,
-                headers: {
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-                    'Access-Control-Allow-Headers': 'Content-Type,x-api-key,x-hub-signature,x-hub-signature-256,x-signature-sha1,x-signature-sha256'
-                }
-            });
+    // CORS preflight
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {
+        status: 204,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type,x-api-key,x-hub-signature,x-hub-signature-256,x-signature-sha1,x-signature-sha256'
         }
-
-        initializeVapid(env);
-
-        if (request.method === 'GET' && url.pathname === '/config') {
-            return json({ vapidPublicKey: env.VAPID_PUBLIC_KEY || '' });
-        }
-
-        if (request.method === 'GET' && url.pathname === '/history') {
-            const now = Date.now();
-            const rawItems = (await getStateJson(env, HISTORY_KEY) || []).filter((item) => {
-                const createdAt = item && item.createdAt ? Date.parse(item.createdAt) : 0;
-                return createdAt && (now - createdAt) <= HISTORY_RETENTION_MS;
-            }).sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0));
-            const items = await Promise.all(rawItems.map(async (item) => {
-                const sourceKey = item.sourceKey || '';
-                const sanitizedSummaryHtml = item.summaryHtml
-                    ? await sanitizeSummaryHtml(item.summaryHtml, item.notificationText, '', { ...item, sourceKey })
-                    : '';
-
-                return {
-                    ...item,
-                    sourceKey,
-                    notificationText: cleanHistoryBodyText(item.notificationText),
-                    summaryHtml: sanitizedSummaryHtml
-                };
-            }));
-            await putStateJson(env, HISTORY_KEY, rawItems);
-            return json({
-                ok: true,
-                items
-            });
-        }
-
-        if (request.method === 'POST' && url.pathname === '/subscribe') {
-            if (!isOriginAllowed(request, allowedOrigins)) return new Response('Forbidden', { status: 403 });
-            const sub = await request.json();
-            const endpoint = sub && sub.endpoint;
-            if (!endpoint) return new Response('Bad Request', { status: 400 });
-
-            const key = await sha256hex(endpoint);
-            try {
-                const existing = await env.SUBS.get(key);
-                if (existing) {
-                    const parsed = JSON.parse(existing);
-                    const plainOld = await aesGcmDecrypt(env.SUBS_ENC_KEY, parsed.iv, parsed.ct);
-                    const objOld = JSON.parse(plainOld);
-                    const oldSub = objOld.sub;
-                    const sameEndpoint = oldSub.endpoint === sub.endpoint;
-                    const sameP256dh = oldSub.keys && sub.keys && oldSub.keys.p256dh === sub.keys.p256dh;
-                    const sameAuth = oldSub.keys && sub.keys && oldSub.keys.auth === sub.keys.auth;
-                    if (sameEndpoint && sameP256dh && sameAuth) {
-                        return json({ status: 'ok', updated: false });
-                    }
-                }
-            } catch (e) {
-            }
-
-            const plain = JSON.stringify({ sub, created: Date.now() });
-            const enc = await aesGcmEncrypt(env.SUBS_ENC_KEY, plain);
-            await env.SUBS.put(key, JSON.stringify({ iv: enc.iv, ct: enc.ct }));
-            return json({ status: 'ok', updated: true });
-        }
-
-        if (request.method === 'POST' && url.pathname === '/unsubscribe') {
-            if (!isOriginAllowed(request, allowedOrigins)) return new Response('Forbidden', { status: 403 });
-            const body = await request.json();
-            if (!body || !body.endpoint) return new Response('Bad Request', { status: 400 });
-            await env.SUBS.delete(await sha256hex(body.endpoint));
-            return json({ status: 'deleted' });
-        }
-
-        if (request.method === 'POST' && url.pathname === '/send') {
-            const apiKey = request.headers.get('x-api-key');
-            if (!apiKey || apiKey !== env.SEND_API_KEY) return new Response('Unauthorized', { status: 401 });
-            const body = await request.json();
-            const endpoint = body && body.endpoint;
-            if (!endpoint) return new Response('Bad Request', { status: 400 });
-
-            const stored = await env.SUBS.get(await sha256hex(endpoint));
-            if (!stored) return new Response('Not found', { status: 404 });
-
-            const parsed = JSON.parse(stored);
-            const plain = await aesGcmDecrypt(env.SUBS_ENC_KEY, parsed.iv, parsed.ct);
-            const subscription = JSON.parse(plain).sub;
-
-            try {
-                await sendNotification(subscription, JSON.stringify(body.payload || {}));
-                return json({ ok: true });
-            } catch (e) {
-                return new Response(String(e && e.message ? e.message : e), { status: 500 });
-            }
-        }
-
-        if (url.pathname === '/websub') {
-            if (request.method === 'GET') {
-                const mode = url.searchParams.get('hub.mode');
-                const challenge = url.searchParams.get('hub.challenge');
-                const token = url.searchParams.get('hub.verify_token');
-                if (!mode || !challenge) return new Response('Bad Request', { status: 400 });
-                if (env.WEBSUB_VERIFY_TOKEN && token !== env.WEBSUB_VERIFY_TOKEN) return new Response('Forbidden', { status: 403 });
-                return new Response(challenge, { status: 200, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
-            }
-
-            if (request.method === 'POST') {
-                const rawBody = await request.arrayBuffer();
-                if (env.WEBSUB_SECRET) {
-                    const ok = await verifyWebhookSignature(request, rawBody, env.WEBSUB_SECRET);
-                    if (!ok) return new Response('Unauthorized', { status: 401 });
-                }
-                const fallbackUrl = url.searchParams.get('hub.topic') || '';
-                const work = handleWebSubDelivery(env, rawBody, fallbackUrl);
-                if (ctx && typeof ctx.waitUntil === 'function') {
-                    ctx.waitUntil(work);
-                } else {
-                    await work;
-                }
-                return new Response(null, { status: 204 });
-            }
-
-            return new Response('Method Not Allowed', { status: 405 });
-        }
-
-        if (request.method === 'POST' && url.pathname === '/websub/subscribe') {
-            if (!isOriginAllowed(request, allowedOrigins)) return new Response('Forbidden', { status: 403 });
-            const body = await request.json().catch(() => ({}));
-            const hub = body.hub || env.WEBSUB_HUB_URL || '';
-            const topic = body.topic || env.WEBSUB_TOPIC || '';
-            const callback = body.callback || env.WEBSUB_CALLBACK_URL || `${url.origin}/websub`;
-            const secret = body.secret || env.WEBSUB_SECRET || '';
-            const leaseSeconds = body.lease_seconds || env.WEBSUB_LEASE_SECONDS || '864000';
-            if (!hub || !topic || !callback) return new Response('Missing hub, topic, or callback URL', { status: 400 });
-
-            const res = await fetch(hub, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: formEncode({
-                    'hub.mode': 'subscribe',
-                    'hub.topic': topic,
-                    'hub.callback': callback,
-                    'hub.secret': secret,
-                    'hub.lease_seconds': leaseSeconds
-                })
-            });
-            return json({ ok: res.ok, status: res.status, body: await res.text().catch(() => '') }, res.status);
-        }
-
-        if (request.method === 'POST' && url.pathname === '/websub/unsubscribe') {
-            if (!isOriginAllowed(request, allowedOrigins)) return new Response('Forbidden', { status: 403 });
-            const body = await request.json().catch(() => ({}));
-            const hub = body.hub || env.WEBSUB_HUB_URL || '';
-            const topic = body.topic || env.WEBSUB_TOPIC || '';
-            const callback = body.callback || env.WEBSUB_CALLBACK_URL || `${url.origin}/websub`;
-            if (!hub || !topic || !callback) return new Response('Missing hub, topic, or callback URL', { status: 400 });
-
-            const res = await fetch(hub, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: formEncode({
-                    'hub.mode': 'unsubscribe',
-                    'hub.topic': topic,
-                    'hub.callback': callback
-                })
-            });
-            return json({ ok: res.ok, status: res.status, body: await res.text().catch(() => '') }, res.status);
-        }
-
-        if (request.method === 'POST' && url.pathname === '/webhook') {
-            if (!isOriginAllowed(request, allowedOrigins)) return new Response('Forbidden', { status: 403 });
-            const rawBody = await request.arrayBuffer();
-            if (env.WEBHOOK_SECRET) {
-                const ok = await verifyWebhookSignature(request, rawBody, env.WEBHOOK_SECRET);
-                if (!ok) return new Response('Unauthorized', { status: 401 });
-            }
-            const work = handleWebhookDelivery(env, rawBody, request.headers.get('content-type') || '');
-            if (ctx && typeof ctx.waitUntil === 'function') {
-                ctx.waitUntil(work);
-            } else {
-                await work;
-            }
-            return new Response(null, { status: 204 });
-        }
-
-        if (request.method === 'GET' && url.pathname === '/rss/preview') {
-            const feedUrl = url.searchParams.get('url') || env.POLL_URL || '';
-            if (!feedUrl) return new Response('Missing feed URL', { status: 400 });
-            const preview = await fetchFeedPreview(feedUrl);
-            return json({
-                ok: true,
-                feedUrl,
-                status: preview.status,
-                contentType: preview.contentType,
-                preview: preview.text.slice(0, 4000)
-            });
-        }
-
-        if (request.method === 'POST' && url.pathname === '/rss/send') {
-            const apiKey = request.headers.get('x-api-key');
-            if (!apiKey || apiKey !== env.SEND_API_KEY) return new Response('Unauthorized', { status: 401 });
-
-            const body = await request.json().catch(() => ({}));
-            const feedUrl = body.url || env.POLL_URL || '';
-            if (!feedUrl) return new Response('Missing feed URL', { status: 400 });
-
-            const preview = await fetchFeedPreview(feedUrl);
-            if (preview.status < 200 || preview.status >= 300) {
-                return json({ ok: false, feedUrl, status: preview.status, error: 'Feed fetch failed' }, 502);
-            }
-
-            const feedConfig = getScheduledFeedConfig(feedUrl);
-            const result = await processFetchedFeedText(env, {
-                sourceKey: feedConfig?.sourceKey || feedUrl,
-                sourceType: 'rss'
-            }, preview.text, { cacheCurrent: false });
-            return json({
-                ok: !result.skipped && result.failed === 0,
-                feedUrl,
-                ...result
-            }, result.skipped ? 200 : (result.failed === 0 ? 200 : 207));
-        }
-
-        return env.ASSETS.fetch(request);
-    },
-
-    async scheduled(controller, env, ctx) {
-        const work = (async () => {
-            initializeVapid(env);
-            if (controller.cron === '0 */1 * * *') {
-                try {
-                    await processQWeatherRainAlert(env);
-                } catch (error) {
-                    console.error('Scheduled weather send failed', error);
-                }
-            } else {
-                // For non-weather cron triggers, run a single merged fetch/process pass per source.
-                for (const feedConfig of DEFAULT_RSS_SOURCES) {
-                    try {
-                        const shouldRefresh = Array.isArray(feedConfig.refreshCrons) && feedConfig.refreshCrons.includes(controller.cron);
-                        const shouldSend = Array.isArray(feedConfig.sendCrons) && feedConfig.sendCrons.includes(controller.cron);
-                        if (!(shouldRefresh || shouldSend)) continue;
-
-                        const preview = await fetchFeedPreview(feedConfig.feedUrl);
-                        if (preview.status < 200 || preview.status >= 300) {
-                            throw new Error(`Scheduled feed fetch failed: ${preview.status}`);
-                        }
-
-                        await processFetchedFeedText(env, {
-                            sourceKey: feedConfig.sourceKey,
-                            sourceType: 'rss'
-                        }, preview.text);
-                    } catch (error) {
-                        console.error(`Scheduled processing failed for ${feedConfig.sourceKey}`, error);
-                    }
-                }
-            }
-        })();
-        if (ctx && typeof ctx.waitUntil === 'function') {
-            ctx.waitUntil(work);
-        } else {
-            await work;
-        }
+      });
     }
+
+    initializeVapid(env);
+
+    // --- GET /config ---
+    if (request.method === 'GET' && url.pathname === '/config') {
+      return json({ vapidPublicKey: env.VAPID_PUBLIC_KEY || '' });
+    }
+
+    // --- GET /history ---
+    if (request.method === 'GET' && url.pathname === '/history') {
+      const now = Date.now();
+      const raw = ((await getStateJson(env, HISTORY_KEY)) || [])
+        .filter(it => it?.createdAt && (now - Date.parse(it.createdAt)) <= HISTORY_RETENTION_MS)
+        .sort((a, b) => (Date.parse(b.createdAt || 0)) - (Date.parse(a.createdAt || 0)));
+
+      // Deduplicate by id (first occurrence wins – already sorted newest-first)
+      const seen = new Set();
+      const deduped = [];
+      for (const it of raw) {
+        if (seen.has(it.id)) continue;
+        seen.add(it.id);
+        deduped.push(it);
+      }
+
+      const items = await Promise.all(deduped.map(async it => {
+        const sk = it.sourceKey || '';
+        const isIthome = sk.toLowerCase() === 'ithome';
+
+        let cleanedText = (it.notificationText || '')
+          .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+          .replace(/\s+/g, ' ').trim();
+        if (cleanedText && !/[.!?。！？…]$/.test(cleanedText)) cleanedText += '...';
+
+        let imageUrl = isIthome ? '' : (it.imageUrl || '');
+        if (!imageUrl && it.summaryHtml) {
+          imageUrl = extractFirstImageSrc(decodeXmlEntities(it.summaryHtml), '');
+        }
+        const baseUrl = it.link ? new URL(it.link).origin : '';
+
+        // Decode entities in stored summaryHtml (old KV data is entity-escaped)
+        it.summaryHtml = isIthome ? '' : (it.summaryHtml ? await sanitizeSummaryHtml(decodeXmlEntities(it.summaryHtml), it.notificationText, baseUrl, sk, 0) : '');
+        it.imageUrl = imageUrl;
+        it.notificationText = cleanedText;
+
+        return {
+          ...it,
+          sourceKey: sk,
+          notificationText: cleanedText,
+          summaryHtml: it.summaryHtml,
+          imageUrl
+        };
+      }));
+
+      await putStateJson(env, HISTORY_KEY, deduped);
+      return json({ ok: true, items });
+    }
+
+    // --- POST /subscribe ---
+    if (request.method === 'POST' && url.pathname === '/subscribe') {
+      if (!isOriginAllowed(request, allowedOrigins)) return new Response('Forbidden', { status: 403 });
+      const sub = await request.json();
+      if (!sub?.endpoint) return new Response('Bad Request', { status: 400 });
+
+      const key = await sha256hex(sub.endpoint);
+      try {
+        const existing = await env.SUBS.get(key);
+        if (existing) {
+          const { iv, ct } = JSON.parse(existing);
+          const old = JSON.parse(await aesGcmDecrypt(env.SUBS_ENC_KEY, iv, ct));
+          if (old.sub?.endpoint === sub.endpoint &&
+              old.sub?.keys?.p256dh === sub.keys?.p256dh &&
+              old.sub?.keys?.auth === sub.keys?.auth) {
+            return json({ status: 'ok', updated: false });
+          }
+        }
+      } catch { /* proceed to overwrite */ }
+
+      const { iv, ct } = await aesGcmEncrypt(env.SUBS_ENC_KEY, JSON.stringify({ sub, created: Date.now() }));
+      await env.SUBS.put(key, JSON.stringify({ iv, ct }));
+      return json({ status: 'ok', updated: true });
+    }
+
+    // --- POST /unsubscribe ---
+    if (request.method === 'POST' && url.pathname === '/unsubscribe') {
+      if (!isOriginAllowed(request, allowedOrigins)) return new Response('Forbidden', { status: 403 });
+      const body = await request.json();
+      if (!body?.endpoint) return new Response('Bad Request', { status: 400 });
+      await env.SUBS.delete(await sha256hex(body.endpoint));
+      return json({ status: 'deleted' });
+    }
+
+    // --- POST /send (admin) ---
+    if (request.method === 'POST' && url.pathname === '/send') {
+      if ((request.headers.get('x-api-key') || '') !== env.SEND_API_KEY) return new Response('Unauthorized', { status: 401 });
+      const body = await request.json();
+      if (!body?.endpoint) return new Response('Bad Request', { status: 400 });
+
+      const stored = await env.SUBS.get(await sha256hex(body.endpoint));
+      if (!stored) return new Response('Not found', { status: 404 });
+
+      const { iv, ct } = JSON.parse(stored);
+      const { sub } = JSON.parse(await aesGcmDecrypt(env.SUBS_ENC_KEY, iv, ct));
+      try { await sendNotification(sub, JSON.stringify(body.payload || {})); return json({ ok: true }); }
+      catch (e) { return new Response(e?.message || String(e), { status: 500 }); }
+    }
+
+    // --- /websub ---
+    if (url.pathname === '/websub') {
+      if (request.method === 'GET') {
+        const mode = url.searchParams.get('hub.mode');
+        const challenge = url.searchParams.get('hub.challenge');
+        const token = url.searchParams.get('hub.verify_token');
+        if (!mode || !challenge) return new Response('Bad Request', { status: 400 });
+        if (env.WEBSUB_VERIFY_TOKEN && token !== env.WEBSUB_VERIFY_TOKEN) return new Response('Forbidden', { status: 403 });
+        return new Response(challenge, { status: 200, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+      }
+
+      if (request.method === 'POST') {
+        const rawBody = await request.arrayBuffer();
+        if (env.WEBSUB_SECRET && !(await verifyWebhookSignature(request, rawBody, env.WEBSUB_SECRET))) {
+          return new Response('Unauthorized', { status: 401 });
+        }
+        const fallbackUrl = url.searchParams.get('hub.topic') || '';
+        const text = new TextDecoder().decode(rawBody);
+        const work = processFetchedFeedText(env, { sourceKey: fallbackUrl ? `websub:${fallbackUrl}` : 'websub:unknown', sourceType: 'websub' }, text, { updateLastSeen: true });
+        ctx?.waitUntil?.(work);
+        return new Response(null, { status: 204 });
+      }
+      return new Response('Method Not Allowed', { status: 405 });
+    }
+
+    // --- POST /websub/subscribe ---
+    if (request.method === 'POST' && url.pathname === '/websub/subscribe') {
+      if (!isOriginAllowed(request, allowedOrigins)) return new Response('Forbidden', { status: 403 });
+      const body = await request.json().catch(() => ({}));
+      const hub = body.hub || env.WEBSUB_HUB_URL || '';
+      const topic = body.topic || env.WEBSUB_TOPIC || '';
+      const callback = body.callback || env.WEBSUB_CALLBACK_URL || `${url.origin}/websub`;
+      const secret = body.secret || env.WEBSUB_SECRET || '';
+      const lease = body.lease_seconds || env.WEBSUB_LEASE_SECONDS || '864000';
+      if (!hub || !topic || !callback) return new Response('Missing hub, topic, or callback URL', { status: 400 });
+
+      const res = await fetch(hub, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: formEncode({ 'hub.mode': 'subscribe', 'hub.topic': topic, 'hub.callback': callback, 'hub.secret': secret, 'hub.lease_seconds': lease })
+      });
+      return json({ ok: res.ok, status: res.status, body: await res.text().catch(() => '') }, res.status);
+    }
+
+    // --- POST /websub/unsubscribe ---
+    if (request.method === 'POST' && url.pathname === '/websub/unsubscribe') {
+      if (!isOriginAllowed(request, allowedOrigins)) return new Response('Forbidden', { status: 403 });
+      const body = await request.json().catch(() => ({}));
+      const hub = body.hub || env.WEBSUB_HUB_URL || '';
+      const topic = body.topic || env.WEBSUB_TOPIC || '';
+      const callback = body.callback || env.WEBSUB_CALLBACK_URL || `${url.origin}/websub`;
+      if (!hub || !topic || !callback) return new Response('Missing hub, topic, or callback URL', { status: 400 });
+
+      const res = await fetch(hub, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: formEncode({ 'hub.mode': 'unsubscribe', 'hub.topic': topic, 'hub.callback': callback })
+      });
+      return json({ ok: res.ok, status: res.status, body: await res.text().catch(() => '') }, res.status);
+    }
+
+    // --- POST /webhook ---
+    if (request.method === 'POST' && url.pathname === '/webhook') {
+      if (!isOriginAllowed(request, allowedOrigins)) return new Response('Forbidden', { status: 403 });
+      const rawBody = await request.arrayBuffer();
+      if (env.WEBHOOK_SECRET && !(await verifyWebhookSignature(request, rawBody, env.WEBHOOK_SECRET))) {
+        return new Response('Unauthorized', { status: 401 });
+      }
+      const contentType = request.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) return new Response(null, { status: 204 });
+
+      const body = JSON.parse(new TextDecoder().decode(rawBody));
+      if (!body?.title) return new Response(null, { status: 204 });
+
+      const item = {
+        title: body.title, description: body.body || '', summaryText: body.body || '',
+        summaryHtml: body.bodyHtml || '', link: body.link || '', imageUrl: body.imageUrl || '',
+        itemId: body.itemKey || body.id || body.link || '', publishedAt: body.publishedAt || new Date().toISOString()
+      };
+      const work = processSourceItem(env, { sourceKey: body.sourceKey || 'webhook:default', sourceType: 'webhook' }, item, { updateLastSeen: true });
+      ctx?.waitUntil?.(work);
+      return new Response(null, { status: 204 });
+    }
+
+    // --- GET /rss/preview ---
+    if (request.method === 'GET' && url.pathname === '/rss/preview') {
+      const feedUrl = url.searchParams.get('url') || env.POLL_URL || '';
+      if (!feedUrl) return new Response('Missing feed URL', { status: 400 });
+      const preview = await fetchFeedPreview(feedUrl);
+      return json({ ok: true, feedUrl, status: preview.status, contentType: preview.contentType, preview: preview.text.slice(0, 4000) });
+    }
+
+    // --- POST /rss/send (admin) ---
+    if (request.method === 'POST' && url.pathname === '/rss/send') {
+      if ((request.headers.get('x-api-key') || '') !== env.SEND_API_KEY) return new Response('Unauthorized', { status: 401 });
+      const body = await request.json().catch(() => ({}));
+      const feedUrl = body.url || env.POLL_URL || '';
+      if (!feedUrl) return new Response('Missing feed URL', { status: 400 });
+
+      const preview = await fetchFeedPreview(feedUrl);
+      if (preview.status < 200 || preview.status >= 300) return json({ ok: false, feedUrl, status: preview.status, error: 'Feed fetch failed' }, 502);
+
+      const cfg = DEFAULT_RSS_SOURCES.find(f => f.feedUrl === feedUrl);
+      const result = await processFetchedFeedText(env, { sourceKey: cfg?.sourceKey || feedUrl, sourceType: 'rss' }, preview.text, { updateLastSeen: true });
+      return json({ ok: !result.skipped && result.failed === 0, feedUrl, ...result }, result.failed === 0 ? 200 : 207);
+    }
+
+    // --- Static assets fallback ---
+    return env.ASSETS.fetch(request);
+  },
+
+  async scheduled(controller, env, ctx) {
+    initializeVapid(env);
+
+    if (controller.cron === '0 */1 * * *') {
+      ctx?.waitUntil?.(processQWeatherRainAlert(env).catch(e => console.error('Weather check failed', e)));
+      return;
+    }
+
+    for (const cfg of DEFAULT_RSS_SOURCES) {
+      const shouldRun = (cfg.sendCrons || []).includes(controller.cron) || (cfg.refreshCrons || []).includes(controller.cron);
+      if (!shouldRun) continue;
+
+      const work = (async () => {
+        const preview = await fetchFeedPreview(cfg.feedUrl);
+        if (preview.status < 200 || preview.status >= 300) throw new Error(`Feed fetch failed: ${preview.status}`);
+        await processFetchedFeedText(env, { sourceKey: cfg.sourceKey, sourceType: 'rss' }, preview.text, { updateLastSeen: true });
+      })().catch(e => console.error(`Scheduled failed for ${cfg.sourceKey}`, e));
+
+      ctx?.waitUntil?.(work);
+    }
+  }
 };
