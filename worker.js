@@ -7,7 +7,7 @@ import { XMLParser } from 'fast-xml-parser';
 // ---------------------------------------------------------------------------
 const SHANGHAI_TZ = 'Asia/Shanghai';
 const HISTORY_KEY = 'items';
-const HISTORY_LIMIT = 100;
+const HISTORY_LIMIT = 200;
 const HISTORY_RETENTION_MS = 3 * 24 * 60 * 60 * 1000;
 const QWEATHER_API_HOST = 'mh7mdaq86q.re.qweatherapi.com';
 
@@ -179,6 +179,7 @@ class SummaryElementSanitizer {
       const href = sanitizeHref(element.getAttribute('href') || '', this.baseUrl);
       if (href) {
         element.setAttribute('href', href);
+        element.setAttribute('target', '_blank');
       } else {
         element.removeAndKeepContent();
       }
@@ -213,7 +214,8 @@ async function sanitizeSummaryHtml(rawHtml, fallbackText, baseUrl = '', sourceKe
       .text();
   } catch { return fallbackText ? `<p>${escapeHtml(fallbackText)}</p>` : ''; }
 
-  safe = safe.trim();
+  // Decode HTML entities after HTMLRewriter (some feeds provide named entities)
+  safe = decodeXmlEntities((safe || '').trim());
   if (!safe) return fallbackText ? `<p>${escapeHtml(fallbackText)}</p>` : '';
 
   // Wikipedia featured-content feeds have structured blurbs that
@@ -295,14 +297,22 @@ function xmlText(node) {
 
 /** Decode common XML/HTML entities and numeric character references. */
 function decodeXmlEntities(str) {
-  return (str || '').replace(/&(?:amp|lt|gt|quot|#39|#(\d+)|#x([0-9a-f]+));/gi, (m, d, h) => {
-    if (m === '&amp;') return '&';
-    if (m === '&lt;') return '<';
-    if (m === '&gt;') return '>';
-    if (m === '&quot;') return '"';
-    if (m === '&#39;') return "'";
-    if (d) return String.fromCodePoint(Number(d));
-    if (h) return String.fromCodePoint(parseInt(h, 16));
+  if (!str) return '';
+  const named = {
+    nbsp: '\u00A0', hellip: '\u2026', mdash: '\u2014', ndash: '\u2013',
+    lsquo: '\u2018', rsquo: '\u2019', ldquo: '\u201C', rdquo: '\u201D',
+    laquo: '\u00AB', raquo: '\u00BB', apos: "'",
+    amp: '&', lt: '<', gt: '>', quot: '"'
+  };
+
+  return String(str).replace(/&(#x[0-9a-fA-F]+|#\d+|[a-zA-Z]+);/g, (m, code) => {
+    if (!code) return m;
+    if (code[0] === '#') {
+      if (code[1] === 'x' || code[1] === 'X') return String.fromCodePoint(parseInt(code.slice(2), 16));
+      return String.fromCodePoint(Number(code.slice(1)));
+    }
+    const key = code.toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(named, key)) return named[key];
     return m;
   });
 }
@@ -313,8 +323,8 @@ function xmlHtml(node) {
   if (typeof node === 'string' || typeof node === 'number') return String(node);
   if (Array.isArray(node)) return node.map(xmlHtml).filter(Boolean).join('');
   if (typeof node === 'object') {
-    if (typeof node.__cdata === 'string') return node.__cdata;
-    if (typeof node['#text'] === 'string') return decodeXmlEntities(node['#text']);
+        if (typeof node.__cdata === 'string') return node.__cdata;
+        if (typeof node['#text'] === 'string') return node['#text'];
   }
   return '';
 }
@@ -723,31 +733,36 @@ export default {
         const sk = it.sourceKey || '';
         const isIthome = sk.toLowerCase() === 'ithome';
 
-        let cleanedText = (it.notificationText || '')
-          .replace(/[\u0000-\u001f\u007f]+/g, ' ')
-          .replace(/\s+/g, ' ').trim();
-        if (cleanedText && !/[.!?。！？…]$/.test(cleanedText)) cleanedText += '...';
+        // Recompute/normalize summaryHtml from stored value so older KV entries
+        // that contain HTML entities get normalized by our sanitizer.
+        const baseUrl = it.link ? new URL(it.link).origin : '';
+        const safeSummary = isIthome ? '' : (it.summaryHtml ? await sanitizeSummaryHtml(decodeXmlEntities(it.summaryHtml), it.notificationText, baseUrl, sk, 0) : '');
+
+        // Rebuild notificationText from the normalized summaryHtml (migrates old stored values)
+        let notificationText = buildNotificationText({ summaryHtml: safeSummary, sourceKey: sk, title: it.title, description: it.description });
+        notificationText = (notificationText || '').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim();
+        if (notificationText && !/[.!?。！？…]$/.test(notificationText)) notificationText += '...';
 
         let imageUrl = isIthome ? '' : (it.imageUrl || '');
-        if (!imageUrl && it.summaryHtml) {
-          imageUrl = extractFirstImageSrc(decodeXmlEntities(it.summaryHtml), '');
+        if (!imageUrl && safeSummary) {
+          imageUrl = extractFirstImageSrc(decodeXmlEntities(safeSummary), '');
         }
-        const baseUrl = it.link ? new URL(it.link).origin : '';
 
-        // Decode entities in stored summaryHtml (old KV data is entity-escaped)
-        it.summaryHtml = isIthome ? '' : (it.summaryHtml ? await sanitizeSummaryHtml(decodeXmlEntities(it.summaryHtml), it.notificationText, baseUrl, sk, 0) : '');
+        // Update the deduped item in-place so that the KV gets migrated
+        it.summaryHtml = safeSummary;
         it.imageUrl = imageUrl;
-        it.notificationText = cleanedText;
+        it.notificationText = notificationText;
 
         return {
           ...it,
           sourceKey: sk,
-          notificationText: cleanedText,
-          summaryHtml: it.summaryHtml,
+          notificationText,
+          summaryHtml: safeSummary,
           imageUrl
         };
       }));
 
+      // Persist migrated/normalized history back to KV
       await putStateJson(env, HISTORY_KEY, deduped);
       return json({ ok: true, items });
     }

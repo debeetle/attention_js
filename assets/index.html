@@ -48,6 +48,7 @@
             color-scheme: light dark;
             --main-borderadius: 18px;
             --main-pad: 12px;
+            /* --nav-viewport-bottom-inset: 0px; */
         }
 
         .notification {
@@ -148,6 +149,7 @@
         nav {
             touch-action: none;
             position: fixed;
+            /* bottom: calc(env(safe-area-inset-bottom, 0px) + var(--nav-viewport-bottom-inset)); */
             bottom: env(safe-area-inset-bottom, 0px);
             left: 22px;
             height: 3.5rem;
@@ -184,7 +186,7 @@
             background: none;
             border: 2px solid grey;
             border-radius: 4px;
-            opacity: 0.2;
+            opacity: 0.3;
             transition: opacity 0.2s ease;
             pointer-events: none;
         }
@@ -237,7 +239,7 @@
         }
 
         nav li.selected {
-            background: rgba(0, 0, 0, 0.3);
+            background: rgba(0, 0, 0, 0.2);
             /* color: blue; */
         }
 
@@ -253,7 +255,7 @@
         const HISTORY_DB_NAME = 'attention';
         const HISTORY_DB_VERSION = 1;
         const HISTORY_STORE_NAME = 'news';
-        const HISTORY_RENDER_LIMIT = 100;
+        const HISTORY_RENDER_LIMIT = 200;
         const SOURCE_META = {
             'picture of the day': { logo: '/figure/Wikipedia-logo-v2.svg' },
             'on this day': { logo: '/figure/Wikipedia-logo-v2.svg' },
@@ -429,6 +431,7 @@
             if (item.link && sourceMeta.logo) {
                 const more = document.createElement('a');
                 more.href = item.link;
+                more.target = '_blank';
                 const logo = document.createElement('img');
                 logo.className = 'favicon';
                 logo.src = sourceMeta.logo;
@@ -571,6 +574,20 @@
             }
         }
 
+        // function syncNavViewportInset() {
+        //     const viewport = window.visualViewport;
+        //     const bottomInset = viewport
+        //         ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
+        //         : 0;
+        //     document.documentElement.style.setProperty('--nav-viewport-bottom-inset', `${Math.round(bottomInset)}px`);
+        // }
+
+        // function settleNavViewportInset() {
+        //     syncNavViewportInset();
+        //     requestAnimationFrame(syncNavViewportInset);
+        //     setTimeout(syncNavViewportInset, 250);
+        // }
+
         function urlBase64ToUint8Array(base64String) {
             const padding = '='.repeat((4 - base64String.length % 4) % 4);
             const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
@@ -651,16 +668,20 @@
                 nav.classList.remove('open');
                 nav.querySelectorAll('li').forEach(li => li.classList.remove('selected'));
             });
-            // document.addEventListener('click', (e) => {
-            //     if (!nav.contains(e.target)) nav.classList.remove('open');
-            // });
 
-            window.addEventListener('pageshow', (e) => {
-                if (e.persisted) {
-                    nav.classList.remove('open');
-                    nav.querySelectorAll('li').forEach(li => li.classList.remove('selected'));
-                }
-            });
+            // const resetNav = () => {
+            //     settleNavViewportInset();
+            //     nav.classList.remove('open');
+            //     nav.querySelectorAll('li').forEach(li => li.classList.remove('selected'));
+            // };
+
+            // settleNavViewportInset();
+            // window.addEventListener('pageshow', resetNav);
+            // // window.addEventListener('focus', resetNav);
+            // window.addEventListener('orientationchange', settleNavViewportInset);
+            // document.addEventListener('visibilitychange', () => {
+            //     if (document.visibilityState === 'visible') resetNav();
+            // });
 
             renderLocalHistory();
             syncHistory();
