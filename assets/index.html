@@ -106,7 +106,7 @@
             bottom: 0;
             padding: 0.5rem;
             color: white;
-            font-size: 0.8rem;
+            font-size: 0.9rem;
             background-color: rgba(255, 255, 255, 0.2);
             -webkit-backdrop-filter: blur(1rem);
             backdrop-filter: blur(1rem);
@@ -152,8 +152,6 @@
             left: 22px;
             height: 3.5rem;
             width: 3.5rem;
-            align-items: center;
-            justify-content: center;
             z-index: 1;
             border-color: none;
             border-radius: 50%;
@@ -164,11 +162,11 @@
                 inset 0 5px 10px rgba(3, 7, 18, 0.1),
                 inset 0 -5px 10px rgba(255, 255, 255, 0.1),
                 inset 0 -1px 2px white,
-                0px 0px 0px rgb(from currentColor calc(3 - r*3/255) calc(7 - g*7/255) calc(18 - b*18/255) / 10%),
-                0px 1px 2px rgb(from currentColor calc(3 - r*3/255) calc(7 - g*7/255) calc(18 - b*18/255) / 8%),
-                0px 2px 4px rgb(from currentColor calc(3 - r*3/255) calc(7 - g*7/255) calc(18 - b*18/255) / 6%),
-                0px 3px 6px rgb(from currentColor calc(3 - r*3/255) calc(7 - g*7/255) calc(18 - b*18/255) / 4%),
-                0px 4px 8px rgb(from currentColor calc(3 - r*3/255) calc(7 - g*7/255) calc(18 - b*18/255) / 2%);
+                0px 0px 0px rgb(from currentColor r g b / 10%),
+                0px 1px 2px rgb(from currentColor r g b / 8%),
+                0px 2px 4px rgb(from currentColor r g b / 6%),
+                0px 3px 6px rgb(from currentColor r g b / 4%),
+                0px 4px 8px rgb(from currentColor r g b / 2%);
             transition: 
                 width 0.4s cubic-bezier(0.25, 0.8, 0.25, 1.2),
                 height 0.4s cubic-bezier(0.25, 0.8, 0.25, 1.2),
@@ -176,11 +174,27 @@
                 background-color 0.2s ease;
         }
 
+        nav::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            margin: auto;
+            width: 1.2rem;
+            height: 1.2rem;
+            background: none;
+            border: 2px solid grey;
+            border-radius: 4px;
+            opacity: 0.2;
+            transition: opacity 0.2s ease;
+            pointer-events: none;
+        }
+        nav.open::after {
+            opacity: 0;
+        }
+
         nav.open {
             height: 16rem;
             width: 12rem;
-            align-items: center;
-            justify-content: center;
             border-radius: var(--main-borderadius);
             padding: 8px;
             background: rgba(255, 255, 255, 0.2);
@@ -190,11 +204,11 @@
                 inset 0 5px 10px rgba(3, 7, 18, 0.1),
                 inset 0 -5px 10px rgba(255, 255, 255, 0.1),
                 inset 0 -1px 2px white,
-                0px 0px 0px rgb(from currentColor calc(3 - r*3/255) calc(7 - g*7/255) calc(18 - b*18/255) / 10%),
-                0px 1px 2px rgb(from currentColor calc(3 - r*3/255) calc(7 - g*7/255) calc(18 - b*18/255) / 8%),
-                0px 2px 4px rgb(from currentColor calc(3 - r*3/255) calc(7 - g*7/255) calc(18 - b*18/255) / 6%),
-                0px 3px 6px rgb(from currentColor calc(3 - r*3/255) calc(7 - g*7/255) calc(18 - b*18/255) / 4%),
-                0px 4px 8px rgb(from currentColor calc(3 - r*3/255) calc(7 - g*7/255) calc(18 - b*18/255) / 2%);
+                0px 0px 0px rgb(from currentColor r g b / 10%),
+                0px 1px 2px rgb(from currentColor r g b / 8%),
+                0px 2px 4px rgb(from currentColor r g b / 6%),
+                0px 3px 6px rgb(from currentColor r g b / 4%),
+                0px 4px 8px rgb(from currentColor r g b / 2%);
         }
 
         nav li {
@@ -208,9 +222,9 @@
             font-family: sans-serif;
             font-weight: bold;
             border-radius: calc(var(--main-borderadius) - 8px);
-            /* cursor: pointer; */
+            cursor: pointer;
             transition: 
-            background 0.1s ease;
+            background 0.2s ease;
         }
 
         nav.open li {
@@ -595,14 +609,14 @@
                 });
 
                 hasSubscribed = true;
-                const button = document.getElementById('permission-grant');
-                if (button) button.style.display = 'none';
+                const registerBtn = document.getElementById('permission-grant');
+                if (registerBtn) registerBtn.style.display = 'none';
             } catch {
             }
         }
 
         window.addEventListener('load', async () => {
-            const button = document.getElementById('permission-grant');
+            const registerBtn = document.getElementById('permission-grant');
 
             // Build source picker from SOURCE_META
             const nav = document.querySelector('nav');
@@ -614,7 +628,7 @@
                 li.dataset.key = key;
                 if (logo) { const img = document.createElement('img'); img.src = logo; li.appendChild(img); }
                 li.appendChild(document.createTextNode(label));
-                nav.appendChild(li);
+                nav.appendChild(li);                
             }
 
             nav.addEventListener('touchstart', (e) => {
@@ -633,8 +647,19 @@
                 nav.classList.remove('open');
                 syncHistory();
             });
-            document.addEventListener('click', (e) => {
-                if (!nav.contains(e.target)) nav.classList.remove('open');
+            nav.addEventListener('touchcancel', (e) => {
+                nav.classList.remove('open');
+                nav.querySelectorAll('li').forEach(li => li.classList.remove('selected'));
+            });
+            // document.addEventListener('click', (e) => {
+            //     if (!nav.contains(e.target)) nav.classList.remove('open');
+            // });
+
+            window.addEventListener('pageshow', (e) => {
+                if (e.persisted) {
+                    nav.classList.remove('open');
+                    nav.querySelectorAll('li').forEach(li => li.classList.remove('selected'));
+                }
             });
 
             renderLocalHistory();
@@ -649,9 +674,9 @@
             }
 
             if (Notification.permission === 'default') {
-                if (button) {
-                    button.style.display = 'inline-block';
-                    button.addEventListener('click', subscribe, { once: true });
+                if (registerBtn) {
+                    // registerBtn.style.display = 'inline-block';
+                    registerBtn.addEventListener('click', subscribe, { once: true });
                 }
                 return;
             }

@@ -22,7 +22,7 @@ const DEFAULT_RSS_SOURCES = [
     includeKeywords: [], excludeKeywords: [],
     sendCrons: ['0 0,4,8,12 * * *'], refreshCrons: ['0 0,4,8,12 * * *'] },
   { sourceKey: 'ithome', feedUrl: 'https://www.ithome.com/rss/',
-    includeKeywords: ["iOS"], excludeKeywords: ['车', '追觅'],
+    includeKeywords: ["iOS"], excludeKeywords: ['追觅', '鸿蒙智', '鼠标', '电影票房'],
     sendCrons: ['0 0,4,8,12 * * *'], refreshCrons: ['0 0,4,8,12 * * *'] }
 ];
 
@@ -924,13 +924,13 @@ export default {
       const shouldRun = (cfg.sendCrons || []).includes(controller.cron) || (cfg.refreshCrons || []).includes(controller.cron);
       if (!shouldRun) continue;
 
-      const work = (async () => {
+      try {
         const preview = await fetchFeedPreview(cfg.feedUrl);
         if (preview.status < 200 || preview.status >= 300) throw new Error(`Feed fetch failed: ${preview.status}`);
         await processFetchedFeedText(env, { sourceKey: cfg.sourceKey, sourceType: 'rss' }, preview.text, { updateLastSeen: true });
-      })().catch(e => console.error(`Scheduled failed for ${cfg.sourceKey}`, e));
-
-      ctx?.waitUntil?.(work);
+      } catch (e) {
+        console.error(`Scheduled failed for ${cfg.sourceKey}`, e);
+      }
     }
   }
 };
