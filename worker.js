@@ -107,12 +107,7 @@ function truncateToSentence(text, maxLen = 10) {
   return end >= 20 ? `${cut.slice(0, end + 1).trim()}...` : `${cut.trim()}...`;
 }
 
-function firstSentence(text) {
-  const s = (text || '').replace(/\s+/g, ' ').trim();
-  if (!s) return '';
-  const i = s.search(/[.!?。！？]/);
-  return (i >= 0 ? s.slice(0, i + 1) : s).trim();
-}
+
 
 const safeEqual = (a, b) => {
   if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
@@ -386,7 +381,7 @@ function parseFeedItemBase(itemNode, feedBaseUrl, sourceKey) {
 async function parseIthomeItem(base) {
   return {
     title: base.title, link: base.link, description: base.description, summaryText: base.description,
-    summaryHtml: '', imageUrl: base.imageUrl, itemId: base.itemId, publishedAt: base.publishedAt, potdLeadSentence: ''
+    summaryHtml: '', imageUrl: base.imageUrl, itemId: base.itemId, publishedAt: base.publishedAt
   };
 }
 
@@ -398,33 +393,35 @@ async function parsePotdItem(base, sourceKey) {
       .transform(new Response(summaryHtml, { headers: { 'Content-Type': 'text/html; charset=utf-8' } }))
       .text();
   } catch { /* keep sanitized summary */ }
-  const potdLeadSentence = firstSentence(summaryHtml.replace(/<[^>]+>/g, ' '));
+    function firstSentence(text) {
+        const s = (text || '').replace(/\s+/g, ' ').trim();
+        if (!s) return '';
+        const i = s.search(/[.!?。！？]/);
+        return (i >= 0 ? s.slice(0, i + 1) : s).trim();
+    }
+  const description = firstSentence(summaryHtml.replace(/<[^>]+>/g, ' '));
   return {
-    title: base.title, link: base.link, description: base.description, summaryText: base.description,
-    summaryHtml, imageUrl: base.imageUrl, itemId: base.itemId, publishedAt: base.publishedAt, potdLeadSentence
+    title: base.title, link: base.link, description, summaryText: description,
+    summaryHtml, imageUrl: base.imageUrl, itemId: base.itemId, publishedAt: base.publishedAt
   };
 }
 
 async function parseOnThisDayItem(base, sourceKey) {
   let summaryHtml = await sanitizeSummaryHtml(base.rawHtml, base.description, base.link, sourceKey);
   const heading = summaryHtml.match(/<p\b[^>]*>[\s\S]*?<\/p>/i)?.[0] || '';
+  const title = decodeXmlEntities(heading.replace(/<[^>]+>/g, '')).replace(/\u00a0/g, ' ').trim();
   const listBody = summaryHtml.match(/<ul\b[^>]*>([\s\S]*?)<\/ul>/i)?.[1] || '';
   const entries = [...listBody.matchAll(/<li\b[^>]*>[\s\S]*?<\/li>/gi)].map(m => m[0]);
 
   if (entries.length) {
-    const selected = (entries.find(entry => /\([^)]*\b(pictured|depicted)\b[^)]*\)/i.test(entry)) || entries[0])
-      .replace(/<img\b[^>]*>/gi, '')
-      .replace(/<\/?div\b[^>]*class=["'][^"']*annotated-picture-list[^"']*["'][^>]*>/gi, '')
-      .trim();
+    const selected = (entries.find(entry => /\([^)]*\b(pictured|depicted)\b[^)]*\)/i.test(entry)) || entries[0]).trim();
     const text = selected.replace(/^<li\b[^>]*>/i, '').replace(/<\/li>$/i, '').trim();
-    summaryHtml = base.imageUrl
-      ? `${heading}<div class="annotated-picture-list"><div>${text}</div><img class="annotated-picture" src="${escapeHtml(base.imageUrl)}" alt=""></div>`
-      : `${heading}${selected}`;
+    summaryHtml = text;
   }
 
   return {
-    title: base.title, link: base.link, description: base.description, summaryText: base.description,
-    summaryHtml, imageUrl: base.imageUrl, itemId: base.itemId, publishedAt: base.publishedAt, potdLeadSentence: ''
+    title, link: base.link, description: base.description, summaryText: base.description,
+    summaryHtml, imageUrl: base.imageUrl, itemId: base.itemId, publishedAt: base.publishedAt
   };
 }
 
@@ -432,7 +429,7 @@ async function parseGenericFeedItem(base, sourceKey) {
   const summaryHtmlRaw = await sanitizeSummaryHtml(base.rawHtml, base.description, base.link, sourceKey);
   return {
     title: base.title, link: base.link, description: base.description, summaryText: base.description,
-    summaryHtml: summaryHtmlRaw, imageUrl: base.imageUrl, itemId: base.itemId, publishedAt: base.publishedAt, potdLeadSentence: ''
+    summaryHtml: summaryHtmlRaw, imageUrl: base.imageUrl, itemId: base.itemId, publishedAt: base.publishedAt
   };
 }
 
@@ -477,7 +474,7 @@ async function parseLatestFeedItem(feedText, source = null) {
 function buildNotificationText(item) {
   const html = item.summaryHtml || '';
   const sourceKey = (item.sourceKey || '').toLowerCase();
-  if (sourceKey === 'picture of the day' && item.potdLeadSentence) return truncateToSentence(item.potdLeadSentence, 10);
+  if (sourceKey === 'picture of the day' && item.description) return truncateToSentence(item.description, 10);
 
   let text = '';
   if (sourceKey === 'on this day') {
@@ -601,7 +598,6 @@ async function processSourceItem(env, source, item, opts = {}) {
     summaryHtml: (source.sourceKey || '').toLowerCase() === 'picture of the day' ? '' : (item.summaryHtml || ''),
     link: item.link || '',
     imageUrl: item.imageUrl || '',
-    potdLeadSentence: item.potdLeadSentence || '',
     publishedAt: item.publishedAt || '',
     createdAt: new Date().toISOString()
   };
@@ -828,7 +824,8 @@ export default {
           : ((isIthome || isPotd) ? '' : (it.summaryHtml ? await sanitizeSummaryHtml(it.summaryHtml, it.notificationText, baseUrl, sk, 0) : ''));
 
         // Rebuild notificationText from the normalized summaryHtml (migrates old stored values)
-        let notificationText = buildNotificationText({ summaryHtml: safeSummary, sourceKey: sk, title: it.title, description: it.description, potdLeadSentence: it.potdLeadSentence || '' });
+        const description = it.description || '';
+        let notificationText = buildNotificationText({ summaryHtml: safeSummary, sourceKey: sk, title: it.title, description });
         notificationText = (notificationText || '').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim();
         if (notificationText && !/[.!?。！？…]$/.test(notificationText)) notificationText += '...';
 
@@ -836,28 +833,29 @@ export default {
         if (!imageUrl && safeSummary) {
           imageUrl = extractFirstImageSrc(safeSummary, baseUrl);
         }
-        const potdLeadSentence = isPotd
-          ? (it.potdLeadSentence || firstSentence((it.summaryHtml || '').replace(/<[^>]+>/g, ' ')))
-          : (it.potdLeadSentence || '');
-
         // Update the deduped item in-place so that the KV gets migrated
+        it.description = description;
         it.summaryHtml = safeSummary;
         it.imageUrl = imageUrl;
         it.notificationText = notificationText;
-        it.potdLeadSentence = potdLeadSentence;
 
         return {
-          ...it,
+          id: it.id,
           sourceKey: sk,
+          title: it.title || '',
+          description,
+          summaryText: it.summaryText || it.description || '',
           notificationText,
           summaryHtml: safeSummary,
+          link: it.link || '',
           imageUrl,
-          potdLeadSentence
+          publishedAt: it.publishedAt || '',
+          createdAt: it.createdAt || ''
         };
       }));
 
       // Persist migrated/normalized history back to KV
-      await putStateJson(env, HISTORY_KEY, deduped);
+      await putStateJson(env, HISTORY_KEY, items);
       return json({ ok: true, items });
     }
 

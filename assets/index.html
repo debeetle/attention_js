@@ -135,10 +135,10 @@
             border-color: rgb(from currentColor r g b / 20%);
         }
 
-        .otd-p-heading {
+        /* .otd-p-heading {
             margin-top: 0;
             margin-bottom: 0;
-        }
+        } */
 
         ul {
             padding-left: 1rem;
@@ -384,7 +384,7 @@
                 const overlay = document.createElement('div');
                 overlay.className = 'picture-overlay';
 
-                if (isPotd && (item.potdLeadSentence || item.summaryHtml)) {
+                if (isPotd && (item.description || item.summaryHtml)) {
                     const fallback = (() => {
                         const d = document.createElement('div');
                         d.innerHTML = item.summaryHtml;
@@ -392,7 +392,7 @@
                         const i = t.search(/[.!?。！？]/);
                         return i >= 0 ? t.slice(0, i + 1) : t;
                     })();
-                    const first = (item.potdLeadSentence || fallback || '').trim();
+                    const first = (item.description || fallback || '').trim();
                     if (first) {
                         const title = document.createElement('div');
                         title.textContent = first;
@@ -466,11 +466,21 @@
         }
 
         function appendOnThisDayBody(parent, item) {
-            const articleText = document.createElement('div');
-            articleText.innerHTML = item.summaryHtml || '';
-            const heading = articleText.querySelector('p');
-            if (heading) heading.style.marginTop = '0';
-            parent.appendChild(articleText);
+            const heading = document.createElement('p');
+            heading.innerHTML = item.title;
+            heading.style.marginTop = '0';
+
+            const annotated = document.createElement('div');
+            annotated.className = 'annotated-picture-list';
+            const annotatedText = document.createElement('div');
+            annotatedText.innerHTML = item.summaryHtml;
+            const annotatedPic = document.createElement('img');
+            annotatedPic.className = 'annotated-picture';
+            annotatedPic.src = item.imageUrl;
+            annotated.appendChild(annotatedText);
+            annotated.appendChild(annotatedPic);
+            parent.appendChild(heading);
+            parent.appendChild(annotated);
         }
 
         function moveChildren(from, to) {
