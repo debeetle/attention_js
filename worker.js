@@ -93,6 +93,11 @@ function toAbsoluteUrl(url, base = '') {
   catch { return url; }
 }
 
+function safeOrigin(url) {
+  try { return url ? new URL(url).origin : ''; }
+  catch { return ''; }
+}
+
 function truncateToSentence(text, maxLen = 10) {
   const s = (text || '').replace(/\s+/g, ' ').trim();
   if (s.length <= maxLen) return s;
@@ -100,6 +105,13 @@ function truncateToSentence(text, maxLen = 10) {
   const end = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? '),
     cut.lastIndexOf('。'), cut.lastIndexOf('！'), cut.lastIndexOf('？'));
   return end >= 20 ? `${cut.slice(0, end + 1).trim()}...` : `${cut.trim()}...`;
+}
+
+function firstSentence(text) {
+  const s = (text || '').replace(/\s+/g, ' ').trim();
+  if (!s) return '';
+  const i = s.search(/[.!?。！？]/);
+  return (i >= 0 ? s.slice(0, i + 1) : s).trim();
 }
 
 const safeEqual = (a, b) => {
@@ -179,7 +191,6 @@ class SummaryElementSanitizer {
       const href = sanitizeHref(element.getAttribute('href') || '', this.baseUrl);
       if (href) {
         element.setAttribute('href', href);
-        element.setAttribute('target', '_blank');
       } else {
         element.removeAndKeepContent();
       }
@@ -199,23 +210,24 @@ class SummaryDocumentSanitizer {
 async function sanitizeSummaryHtml(rawHtml, fallbackText, baseUrl = '', sourceKey = '', maxSentences = 3) {
   if (!rawHtml) return fallbackText ? `<p>${escapeHtml(fallbackText)}</p>` : '';
 
-  // Pre-clean: strip control chars & MediaWiki UNIQ markers before parsing
+  // Pre-clean first, then decode entities, then filter tags/attrs via HTMLRewriter.
+  // This keeps responsibilities separate and avoids recreating filtered tags after sanitize.
   const preCleaned = (rawHtml || '')
     .replace(/[\u0000-\u001f\u007f]+/g, ' ')
     .replace(/\s*['"`]*\s*UNIQ--[\w-]+-QINU\s*['"`]*\s*/g, ' ')
     .replace(/\s+/g, ' ').trim();
+  const decoded = decodeXmlEntities(preCleaned);
 
   let safe;
   try {
     safe = await new HTMLRewriter()
       .on('*', new SummaryElementSanitizer(baseUrl))
       .onDocument(new SummaryDocumentSanitizer())
-      .transform(new Response(preCleaned, { headers: { 'Content-Type': 'text/html; charset=utf-8' } }))
+      .transform(new Response(decoded, { headers: { 'Content-Type': 'text/html; charset=utf-8' } }))
       .text();
   } catch { return fallbackText ? `<p>${escapeHtml(fallbackText)}</p>` : ''; }
 
-  // Decode HTML entities after HTMLRewriter (some feeds provide named entities)
-  safe = decodeXmlEntities((safe || '').trim());
+  safe = (safe || '').trim();
   if (!safe) return fallbackText ? `<p>${escapeHtml(fallbackText)}</p>` : '';
 
   // Wikipedia featured-content feeds have structured blurbs that
@@ -346,25 +358,96 @@ function resolveFeedLink(linkNode, baseUrl = '') {
 /** Extract the first <img> src from an HTML snippet using regex. */
 function extractFirstImageSrc(html, baseUrl = '') {
   if (!html) return '';
-  const imgMatch = html.match(/<img[^>]+src=["']([^"']+)["'][^>]*>/i);
+  const normalizedHtml = decodeXmlEntities(String(html))
+    .replace(/\\\//g, '/')
+    .replace(/\\"/g, '"');
+  const imgMatch = normalizedHtml.match(/<img[^>]+src=["']([^"']+)["'][^>]*>/i);
   if (imgMatch) return toAbsoluteUrl(imgMatch[1], baseUrl);
-  const m = html.match(/<media:(content|thumbnail)[^>]*url=["']([^"']+)["'][^>]*\/?>/i);
+  const m = normalizedHtml.match(/<media:(content|thumbnail)[^>]*url=["']([^"']+)["'][^>]*\/?>/i);
   return m ? toAbsoluteUrl(m[2], baseUrl) : '';
 }
 
-/** Parse one <entry> / <item> node into a plain object. */
-async function parseFeedItem(itemNode, feedBaseUrl, source) {
-  const isIthome = (source?.sourceKey || '').toLowerCase() === 'ithome';
+function parseFeedItemBase(itemNode, feedBaseUrl, sourceKey) {
+  const isIthome = sourceKey === 'ithome';
   const title = xmlText(itemNode.title).replace(/<[^>]+>/g, '').trim();
   const link = resolveFeedLink(itemNode.link, feedBaseUrl) || toAbsoluteUrl(xmlText(itemNode.link), feedBaseUrl);
   const itemId = xmlText(itemNode.id || itemNode.guid) || link;
   const publishedAt = xmlText(itemNode.updated || itemNode.published || itemNode.pubDate);
-  const rawHtml = isIthome ? '' : xmlHtml(itemNode.summary || itemNode.content || itemNode.description);
-  const imageUrl = extractFirstImageSrc(rawHtml, feedBaseUrl || link);
+  const summaryHtmlNode = xmlHtml(itemNode.summary);
+  const contentHtmlNode = xmlHtml(itemNode.content);
+  const descriptionHtmlNode = xmlHtml(itemNode.description);
+  const rawHtml = isIthome ? '' : (summaryHtmlNode || contentHtmlNode || descriptionHtmlNode);
+  const imageScanHtml = [summaryHtmlNode, contentHtmlNode, descriptionHtmlNode].filter(Boolean).join(' ');
+  const imageUrl = extractFirstImageSrc(imageScanHtml || rawHtml, feedBaseUrl || link);
   const description = isIthome ? title : truncateToSentence(rawHtml.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim(), 180);
-  const summaryHtml = isIthome ? '' : await sanitizeSummaryHtml(rawHtml, description, feedBaseUrl || link, source?.sourceKey);
+  return { title, link, itemId, publishedAt, rawHtml, imageUrl, description };
+}
 
-  return { title, link, description, summaryText: description, summaryHtml, imageUrl, itemId, publishedAt };
+async function parseIthomeItem(base) {
+  return {
+    title: base.title, link: base.link, description: base.description, summaryText: base.description,
+    summaryHtml: '', imageUrl: base.imageUrl, itemId: base.itemId, publishedAt: base.publishedAt, potdLeadSentence: ''
+  };
+}
+
+async function parsePotdItem(base, sourceKey) {
+  let summaryHtml = await sanitizeSummaryHtml(base.rawHtml, base.description, base.link, sourceKey);
+  try {
+    summaryHtml = await new HTMLRewriter()
+      .on('a', { element: element => element.removeAndKeepContent() })
+      .transform(new Response(summaryHtml, { headers: { 'Content-Type': 'text/html; charset=utf-8' } }))
+      .text();
+  } catch { /* keep sanitized summary */ }
+  const potdLeadSentence = firstSentence(summaryHtml.replace(/<[^>]+>/g, ' '));
+  return {
+    title: base.title, link: base.link, description: base.description, summaryText: base.description,
+    summaryHtml, imageUrl: base.imageUrl, itemId: base.itemId, publishedAt: base.publishedAt, potdLeadSentence
+  };
+}
+
+async function parseOnThisDayItem(base, sourceKey) {
+  let summaryHtml = await sanitizeSummaryHtml(base.rawHtml, base.description, base.link, sourceKey);
+  const heading = summaryHtml.match(/<p\b[^>]*>[\s\S]*?<\/p>/i)?.[0] || '';
+  const listBody = summaryHtml.match(/<ul\b[^>]*>([\s\S]*?)<\/ul>/i)?.[1] || '';
+  const entries = [...listBody.matchAll(/<li\b[^>]*>[\s\S]*?<\/li>/gi)].map(m => m[0]);
+
+  if (entries.length) {
+    const selected = (entries.find(entry => /\([^)]*\b(pictured|depicted)\b[^)]*\)/i.test(entry)) || entries[0])
+      .replace(/<img\b[^>]*>/gi, '')
+      .replace(/<\/?div\b[^>]*class=["'][^"']*annotated-picture-list[^"']*["'][^>]*>/gi, '')
+      .trim();
+    const text = selected.replace(/^<li\b[^>]*>/i, '').replace(/<\/li>$/i, '').trim();
+    summaryHtml = base.imageUrl
+      ? `${heading}<div class="annotated-picture-list"><div>${text}</div><img class="annotated-picture" src="${escapeHtml(base.imageUrl)}" alt=""></div>`
+      : `${heading}${selected}`;
+  }
+
+  return {
+    title: base.title, link: base.link, description: base.description, summaryText: base.description,
+    summaryHtml, imageUrl: base.imageUrl, itemId: base.itemId, publishedAt: base.publishedAt, potdLeadSentence: ''
+  };
+}
+
+async function parseGenericFeedItem(base, sourceKey) {
+  const summaryHtmlRaw = await sanitizeSummaryHtml(base.rawHtml, base.description, base.link, sourceKey);
+  return {
+    title: base.title, link: base.link, description: base.description, summaryText: base.description,
+    summaryHtml: summaryHtmlRaw, imageUrl: base.imageUrl, itemId: base.itemId, publishedAt: base.publishedAt, potdLeadSentence: ''
+  };
+}
+
+const FEED_ITEM_PARSERS = {
+  'ithome': parseIthomeItem,
+  'picture of the day': parsePotdItem,
+  'on this day': parseOnThisDayItem
+};
+
+/** Parse one <entry> / <item> node into a plain object. */
+async function parseFeedItem(itemNode, feedBaseUrl, source) {
+  const sourceKey = (source?.sourceKey || '').toLowerCase();
+  const base = parseFeedItemBase(itemNode, feedBaseUrl, sourceKey);
+  const parser = FEED_ITEM_PARSERS[sourceKey] || parseGenericFeedItem;
+  return parser(base, sourceKey);
 }
 
 /** Parse a complete RSS/Atom feed text, return items sorted oldest-first. */
@@ -394,6 +477,7 @@ async function parseLatestFeedItem(feedText, source = null) {
 function buildNotificationText(item) {
   const html = item.summaryHtml || '';
   const sourceKey = (item.sourceKey || '').toLowerCase();
+  if (sourceKey === 'picture of the day' && item.potdLeadSentence) return truncateToSentence(item.potdLeadSentence, 10);
 
   let text = '';
   if (sourceKey === 'on this day') {
@@ -420,8 +504,8 @@ function buildNotificationText(item) {
 function buildNotificationPayload(historyItem) {
   const display = SOURCE_DISPLAY_NAMES[(historyItem.sourceKey || '').toLowerCase()] || '';
   const title = display
-    ? `${display} ${historyItem.title || historyItem.sourceKey || 'Notification'}`
-    : (historyItem.title || historyItem.sourceKey || 'Notification');
+    ? `${display} ${historyItem.title}`
+    : (historyItem.title);
 
   return {
     web_push: 8030,
@@ -514,9 +598,10 @@ async function processSourceItem(env, source, item, opts = {}) {
     id: `${source.sourceKey}:${key}`,
     sourceKey: source.sourceKey,
     title: item.title || '',
-    summaryHtml: item.summaryHtml || '',
+    summaryHtml: (source.sourceKey || '').toLowerCase() === 'picture of the day' ? '' : (item.summaryHtml || ''),
     link: item.link || '',
     imageUrl: item.imageUrl || '',
+    potdLeadSentence: item.potdLeadSentence || '',
     publishedAt: item.publishedAt || '',
     createdAt: new Date().toISOString()
   };
@@ -732,33 +817,42 @@ export default {
       const items = await Promise.all(deduped.map(async it => {
         const sk = it.sourceKey || '';
         const isIthome = sk.toLowerCase() === 'ithome';
+        const isPotd = sk.toLowerCase() === 'picture of the day';
+        const isOnThisDay = sk.toLowerCase() === 'on this day';
 
-        // Recompute/normalize summaryHtml from stored value so older KV entries
-        // that contain HTML entities get normalized by our sanitizer.
-        const baseUrl = it.link ? new URL(it.link).origin : '';
-        const safeSummary = isIthome ? '' : (it.summaryHtml ? await sanitizeSummaryHtml(decodeXmlEntities(it.summaryHtml), it.notificationText, baseUrl, sk, 0) : '');
+        // Recompute/normalize summaryHtml from stored value.
+        // Keep the same decode order as ingest path: sanitize first, decode inside sanitizer.
+        const baseUrl = safeOrigin(it.link);
+        const safeSummary = isOnThisDay
+          ? (it.summaryHtml || '')
+          : ((isIthome || isPotd) ? '' : (it.summaryHtml ? await sanitizeSummaryHtml(it.summaryHtml, it.notificationText, baseUrl, sk, 0) : ''));
 
         // Rebuild notificationText from the normalized summaryHtml (migrates old stored values)
-        let notificationText = buildNotificationText({ summaryHtml: safeSummary, sourceKey: sk, title: it.title, description: it.description });
+        let notificationText = buildNotificationText({ summaryHtml: safeSummary, sourceKey: sk, title: it.title, description: it.description, potdLeadSentence: it.potdLeadSentence || '' });
         notificationText = (notificationText || '').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim();
         if (notificationText && !/[.!?。！？…]$/.test(notificationText)) notificationText += '...';
 
         let imageUrl = isIthome ? '' : (it.imageUrl || '');
         if (!imageUrl && safeSummary) {
-          imageUrl = extractFirstImageSrc(decodeXmlEntities(safeSummary), '');
+          imageUrl = extractFirstImageSrc(safeSummary, baseUrl);
         }
+        const potdLeadSentence = isPotd
+          ? (it.potdLeadSentence || firstSentence((it.summaryHtml || '').replace(/<[^>]+>/g, ' ')))
+          : (it.potdLeadSentence || '');
 
         // Update the deduped item in-place so that the KV gets migrated
         it.summaryHtml = safeSummary;
         it.imageUrl = imageUrl;
         it.notificationText = notificationText;
+        it.potdLeadSentence = potdLeadSentence;
 
         return {
           ...it,
           sourceKey: sk,
           notificationText,
           summaryHtml: safeSummary,
-          imageUrl
+          imageUrl,
+          potdLeadSentence
         };
       }));
 

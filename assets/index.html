@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport"
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <meta name="referrer" content="no-referrer">
+    <!-- <meta name="referrer" content="no-referrer"> -->
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="icon" type="image/png" href="/figure/icon.png">
     <link rel="apple-touch-icon" href="/figure/icon.png">
@@ -368,7 +368,7 @@
             const isIthome = (item.sourceKey || '').toLowerCase() === 'ithome';
             const isPotd = (item.sourceKey || '').toLowerCase() === 'picture of the day';
 
-            if (item.imageUrl && !isOnThisDay && !isIthome) {
+            if (item.imageUrl && !isOnThisDay) {
                 const pictureWrap = document.createElement('div');
                 pictureWrap.className = 'picture-wrap';
 
@@ -384,12 +384,15 @@
                 const overlay = document.createElement('div');
                 overlay.className = 'picture-overlay';
 
-                if (isPotd && item.summaryHtml) {
-                    const d = document.createElement('div');
-                    d.innerHTML = item.summaryHtml;
-                    const t = (d.textContent || '').trim();
-                    const i = t.search(/[.!?。！？]/);
-                    const first = i >= 0 ? t.slice(0, i + 1) : t;
+                if (isPotd && (item.potdLeadSentence || item.summaryHtml)) {
+                    const fallback = (() => {
+                        const d = document.createElement('div');
+                        d.innerHTML = item.summaryHtml;
+                        const t = (d.textContent || '').trim();
+                        const i = t.search(/[.!?。！？]/);
+                        return i >= 0 ? t.slice(0, i + 1) : t;
+                    })();
+                    const first = (item.potdLeadSentence || fallback || '').trim();
                     if (first) {
                         const title = document.createElement('div');
                         title.textContent = first;
@@ -464,73 +467,10 @@
 
         function appendOnThisDayBody(parent, item) {
             const articleText = document.createElement('div');
-
-            const wrapper = document.createElement('div');
-            wrapper.innerHTML = item.summaryHtml || '';
-
-            const heading = wrapper.querySelector('p');
-            const allEntries = Array.from(wrapper.querySelectorAll('li'));
-
-            heading.style.marginTop = '0';
-            articleText.appendChild(heading);
-
-            if (allEntries.length) {
-                const entries = selectOnThisDayEntries(allEntries, findPicturedIndex(allEntries));
-                if (entries.length === 1) {
-                    moveChildren(buildOnThisDayEntry(entries[0], item), articleText);
-                } else {
-                    const list = document.createElement('ul');
-                    for (const entry of entries) {
-                        list.appendChild(buildOnThisDayEntry(entry, item));
-                    }
-                    articleText.appendChild(list);
-                }
-            }
-
-            if (!heading && !allEntries.length && item.summaryHtml) {
-                articleText.innerHTML = item.summaryHtml;
-            }
-
+            articleText.innerHTML = item.summaryHtml || '';
+            const heading = articleText.querySelector('p');
+            if (heading) heading.style.marginTop = '0';
             parent.appendChild(articleText);
-        }
-
-        function findPicturedIndex(entries) {
-            return entries.findIndex((entry) => /\((pictured|depicted)\)/i.test(entry.textContent || ''));
-        }
-
-        function selectOnThisDayEntries(entries, picturedIndex) {
-            if (picturedIndex >= 0) return [entries[picturedIndex]];
-            return entries.slice(0, 3);
-        }
-
-        function buildOnThisDayEntry(entry, item) {
-            const cleanEntry = entry.cloneNode(true);
-            cleanEntry.querySelectorAll('img, .annotated-picture').forEach((node) => node.remove());
-            cleanEntry.querySelectorAll('.annotated-picture-list').forEach(unwrapElement);
-
-            const li = document.createElement('li');
-            if (/\((pictured|depicted)\)/i.test(cleanEntry.textContent || '') && item.imageUrl) {
-                const row = document.createElement('div');
-                row.className = 'annotated-picture-list';
-
-                const text = document.createElement('div');
-                moveChildren(cleanEntry, text);
-
-                const image = document.createElement('img');
-                image.className = 'annotated-picture';
-                image.src = item.imageUrl;
-                image.alt = '';
-                image.decoding = 'async';
-                image.loading = 'lazy';
-                image.fetchPriority = 'low';
-
-                row.append(text, image);
-                li.appendChild(row);
-                return li;
-            }
-
-            moveChildren(cleanEntry, li);
-            return li;
         }
 
         function moveChildren(from, to) {
@@ -573,20 +513,6 @@
             } catch {
             }
         }
-
-        // function syncNavViewportInset() {
-        //     const viewport = window.visualViewport;
-        //     const bottomInset = viewport
-        //         ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
-        //         : 0;
-        //     document.documentElement.style.setProperty('--nav-viewport-bottom-inset', `${Math.round(bottomInset)}px`);
-        // }
-
-        // function settleNavViewportInset() {
-        //     syncNavViewportInset();
-        //     requestAnimationFrame(syncNavViewportInset);
-        //     setTimeout(syncNavViewportInset, 250);
-        // }
 
         function urlBase64ToUint8Array(base64String) {
             const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -668,20 +594,6 @@
                 nav.classList.remove('open');
                 nav.querySelectorAll('li').forEach(li => li.classList.remove('selected'));
             });
-
-            // const resetNav = () => {
-            //     settleNavViewportInset();
-            //     nav.classList.remove('open');
-            //     nav.querySelectorAll('li').forEach(li => li.classList.remove('selected'));
-            // };
-
-            // settleNavViewportInset();
-            // window.addEventListener('pageshow', resetNav);
-            // // window.addEventListener('focus', resetNav);
-            // window.addEventListener('orientationchange', settleNavViewportInset);
-            // document.addEventListener('visibilitychange', () => {
-            //     if (document.visibilityState === 'visible') resetNav();
-            // });
 
             renderLocalHistory();
             syncHistory();
