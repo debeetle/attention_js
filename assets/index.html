@@ -56,7 +56,7 @@
             border: 1px solid;
             border-color: rgb(from currentColor r g b / 60%);
             border-radius: var(--main-borderadius);
-            overflow-wrap: anywhere;
+            /* overflow-wrap: anywhere; */
             max-width: 30rem;
         }
 
@@ -178,7 +178,7 @@
             height: 1.4rem;
             background: none;
             border: 1.5px solid currentColor;
-            border-radius: 6px;
+            border-radius: 1px;
             opacity: 0.3;
             transition: opacity 0.1s ease;
             pointer-events: none;
@@ -571,19 +571,12 @@
 
             let activePointerId = null;
 
-            function navworkaround(e) {
-                if (e.pointerId === activePointerId) cleanup()
-            }
-
             nav.addEventListener('pointerdown', (e) => {
                 if (activePointerId === null) {
                     activePointerId = e.pointerId;
                     nav.classList.add('open');
                     nav.setPointerCapture(e.pointerId);
 
-                    document.addEventListener('pointerup', navworkaround, { capture: true, passive: true });
-
-                    document.addEventListener('pointercancel', navworkaround, { capture: true, passive: true });
                 }
             });
 
@@ -601,6 +594,15 @@
                 }
             });
 
+            document.addEventListener('pointerup', (e) => {
+                if (e.pointerId !== activePointerId) return;
+                cleanup();
+            }, { capture: true, passive: true });
+            document.addEventListener('pointercancel', (e) => {
+                if (e.pointerId !== activePointerId) return;
+                cleanup();
+            }, { capture: true, passive: true });
+
             function cleanup() {
                 nav.classList.remove('open');
                 nav.querySelectorAll('li').forEach(li => li.classList.remove('selected'));
@@ -610,8 +612,6 @@
                     } catch (e) { }
                 }
                 activePointerId = null;
-                document.removeEventListener('pointerup', navworkaround);
-                document.removeEventListener('pointercancel', navworkaround);
             }
 
             renderLocalHistory();
@@ -645,162 +645,6 @@
             }
         });
     </script>
-
-    <!-- <script id="debug-touch">
-        (function () {
-            if (document.getElementById('debug-touch-overlay')) return;
-            const overlay = document.createElement('div');
-            overlay.id = 'debug-touch-overlay';
-            Object.assign(overlay.style, {
-                position: 'fixed',
-                right: '8px',
-                top: '8px',
-                width: '320px',
-                maxHeight: '50vh',
-                overflow: 'auto',
-                zIndex: 999999,
-                background: 'rgba(0,0,0,0.8)',
-                color: 'white',
-                fontSize: '12px',
-                fontFamily: 'monospace',
-                padding: '8px',
-                borderRadius: '8px'
-            });
-
-            const header = document.createElement('div');
-            header.style.display = 'flex';
-            header.style.gap = '8px';
-            header.style.marginBottom = '6px';
-
-            const clearBtn = document.createElement('button');
-            clearBtn.textContent = 'Clear';
-            clearBtn.style.cursor = 'pointer';
-            clearBtn.style.fontSize = '12px';
-
-            const removeBtn = document.createElement('button');
-            removeBtn.textContent = 'Remove debug';
-            removeBtn.style.cursor = 'pointer';
-            removeBtn.style.fontSize = '12px';
-
-            header.appendChild(clearBtn);
-            header.appendChild(removeBtn);
-
-            const list = document.createElement('div');
-            overlay.appendChild(header);
-            overlay.appendChild(list);
-            document.body.appendChild(overlay);
-
-            clearBtn.onclick = () => (list.innerHTML = '');
-            removeBtn.onclick = removeAll;
-
-            const targets = [
-                { el: document, name: 'document' },
-                { el: document.getElementById('history'), name: '#history' },
-                { el: document.querySelector('nav'), name: 'nav' }
-            ].filter(t => t.el);
-
-            function log(targetName, ev) {
-                const ts = new Date().toISOString().slice(11,23);
-                const targetId = (ev && ev.target && (ev.target.id || ev.target.className || ev.target.tagName)) || '-';
-                const def = ev && ev.defaultPrevented ? 'true' : 'false';
-                const cancel = ev && ev.cancelable ? 'true' : 'false';
-                const pid = (ev && ev.pointerId !== undefined) ? ev.pointerId : '-';
-                const cx = ev && (ev.clientX !== undefined ? ev.clientX : '-');
-                const cy = ev && (ev.clientY !== undefined ? ev.clientY : '-');
-                const typ = ev && ev.type ? ev.type : String(ev && ev.type) || '-';
-                const extra = ev && ev.hasCapture !== undefined ? ` hasCapture=${ev.hasCapture}` : '';
-                const info = `${ts} ${targetName} ${typ} target=${targetId} defaultPrevented=${def} cancelable=${cancel} pointerId=${pid} client=(${cx},${cy})${extra}`;
-                const entry = document.createElement('div');
-                entry.textContent = info;
-                entry.style.padding = '2px 0';
-                list.insertBefore(entry, list.firstChild);
-                while (list.childElementCount > 200) list.removeChild(list.lastChild);
-                console.info(info, ev);
-            }
-
-            const evNames = ['pointerdown','pointermove','pointerup','pointercancel','touchstart','touchmove','touchend','click'];
-
-            const listeners = [];
-            for (const t of targets) {
-                for (const name of evNames) {
-                    const onEv = function (ev) {
-                        try { log(t.name, ev); } catch (e) {}
-                    };
-                    t.el.addEventListener(name, onEv, { capture: true, passive: false });
-                    t.el.addEventListener(name, onEv, { capture: false, passive: false });
-                    listeners.push({ el: t.el, name, onEv, opts: { capture: true } });
-                    listeners.push({ el: t.el, name, onEv, opts: { capture: false } });
-                }
-            }
-
-            const nav = document.querySelector('nav');
-            if (nav) {
-                const intervalId = setInterval(function captureStateCheck() {
-                    try {
-                        const pid = window.activePointerId ?? window.__activePointerId ?? overlay.dataset.guessPointerId ?? null;
-                        const has = (pid !== null && typeof nav.hasPointerCapture === 'function') ? nav.hasPointerCapture(pid) : 'unknown';
-                        log('nav', { type: 'capture-check', target: nav, defaultPrevented: false, cancelable: false, pointerId: pid, clientX: '-', clientY: '-', hasCapture: has });
-                    } catch (e) {
-                        log('nav', { type: 'capture-check-error', pointerId: '-', defaultPrevented: false, cancelable: false });
-                    }
-                }, 1000);
-                overlay.dataset.intervalId = String(intervalId);
-            }
-
-            try {
-                if (nav && typeof nav.setPointerCapture === 'function' && !nav.__dbg_patched) {
-                    const origSet = nav.setPointerCapture.bind(nav);
-                    const origRelease = nav.releasePointerCapture.bind(nav);
-                    nav.setPointerCapture = function(pid) {
-                        log('nav', { type: 'setPointerCapture', pointerId: pid, target: nav });
-                        overlay.dataset.guessPointerId = String(pid);
-                        return origSet(pid);
-                    };
-                    nav.releasePointerCapture = function(pid) {
-                        log('nav', { type: 'releasePointerCapture', pointerId: pid, target: nav });
-                        if (overlay.dataset.guessPointerId === String(pid)) delete overlay.dataset.guessPointerId;
-                        return origRelease(pid);
-                    };
-                    nav.__dbg_patched = true;
-                }
-            } catch (e) {}
-
-            function tryDumpActivePointer() {
-                try {
-                    const ap = (window.activePointerId !== undefined) ? window.activePointerId : (window.__activePointerId !== undefined ? window.__activePointerId : null);
-                    if (ap !== null && ap !== undefined) {
-                        const ent = document.createElement('div');
-                        ent.textContent = `activePointerId (global guess) = ${ap}`;
-                        ent.style.opacity = '0.7';
-                        list.insertBefore(ent, list.firstChild);
-                    }
-                } catch (e) {}
-            }
-            const dumpInterval = setInterval(tryDumpActivePointer, 2000);
-            overlay.dataset.dumpInterval = String(dumpInterval);
-
-            function removeAll() {
-                for (const { el, name, onEv, opts } of listeners) {
-                    try { el.removeEventListener(name, onEv, opts); } catch (e) {}
-                }
-                const id = Number(overlay.dataset.intervalId);
-                if (id) clearInterval(id);
-                const di = Number(overlay.dataset.dumpInterval);
-                if (di) clearInterval(di);
-                if (nav && nav.__dbg_patched) {
-                    try {
-                        delete nav.__dbg_patched;
-                    } catch (e) {}
-                }
-                overlay.remove();
-                const script = document.getElementById('debug-touch');
-                if (script) script.remove();
-                try { delete window.__removeDebugTouch; } catch (e) {}
-            }
-
-            window.__removeDebugTouch = removeAll;
-        })();
-        </script> -->
 
 </body>
 
