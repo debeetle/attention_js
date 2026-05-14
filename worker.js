@@ -22,7 +22,7 @@ const DEFAULT_RSS_SOURCES = [
     includeKeywords: [], excludeKeywords: [],
     sendCrons: ['0 0,4,8,12 * * *'], refreshCrons: ['0 0,4,8,12 * * *'] },
   { sourceKey: 'ithome', feedUrl: 'https://www.ithome.com/rss/',
-    includeKeywords: ["iOS"], excludeKeywords: ['追觅', '鸿蒙智', '鼠标', '电影票房'],
+    includeKeywords: ["苹果", "微软", "谷歌"], excludeKeywords: ['追觅', '鸿蒙智', '鼠标', '电影票房', '荣耀'],
     sendCrons: ['0 0,4,8,12 * * *'], refreshCrons: ['0 0,4,8,12 * * *'] }
 ];
 
@@ -34,13 +34,14 @@ const FEED_XML_PARSER = new XMLParser({
 });
 
 // Tags whose content is kept but the tag itself is removed (unwrap).
-const UNWRAP_TAGS = new Set(['b', 'strong']);
+const UNWRAP_TAGS = new Set(['b', 'strong', 'em']);
 // Tags that are removed entirely including children.
-const DROP_TAGS = new Set(['script', 'style', 'link', 'img']);
+const DROP_TAGS = new Set(['script', 'link', 'img']);
+const DROP_ATTRIBUTES = new Set(['style', 'class', 'title']);
 
 const SOURCE_DISPLAY_NAMES = {
-  'picture of the day': '[POTD]', 'on this day': '[OTD]', 'do you know': '[DYK]',
-  'sspai': '[sspai]', 'ithome': '[IThome]', 'weather': '[Weather]'
+  'picture of the day': '[Potd]', 'on this day': '[Otd]', 'do you know': '[Dyk]',
+  'sspai': '[Sspai]', 'ithome': '[IThome]', 'weather': '[Weather]'
 };
 
 // ---------------------------------------------------------------------------
@@ -164,31 +165,22 @@ class SummaryElementSanitizer {
       return;
     }
 
-    // Strip inline style from every element
-    if (element.hasAttribute('style')) {
-      element.removeAttribute('style');
-    }
-
     if (UNWRAP_TAGS.has(tag)) {
       element.removeAndKeepContent();
       return;
     }
 
-    // Keep href on <a>; strip every other attribute
-    for (const attr of [...(element.attributes || [])]) {
-      const name = (attr?.name || '').toLowerCase();
-      if (!name) continue;
-      if (tag === 'a' && name === 'href') continue;
-      element.removeAttribute(attr.name);
+    for (const name of DROP_ATTRIBUTES) {
+      if (element.getAttribute(name) !== null) {
+        element.removeAttribute(name);
+      }
     }
 
     if (tag === 'a') {
       const href = sanitizeHref(element.getAttribute('href') || '', this.baseUrl);
       if (href) {
         element.setAttribute('href', href);
-      } else {
-        element.removeAndKeepContent();
-      }
+      } 
     }
   }
 }
@@ -595,7 +587,9 @@ async function processSourceItem(env, source, item, opts = {}) {
     id: `${source.sourceKey}:${key}`,
     sourceKey: source.sourceKey,
     title: item.title || '',
-    summaryHtml: (source.sourceKey || '').toLowerCase() === 'picture of the day' ? '' : (item.summaryHtml || ''),
+    description: item.description || '',
+    summaryText: item.summaryText || '',
+    summaryHtml: item.summaryHtml || '',
     link: item.link || '',
     imageUrl: item.imageUrl || '',
     publishedAt: item.publishedAt || '',
@@ -821,7 +815,7 @@ export default {
         const baseUrl = safeOrigin(it.link);
         const safeSummary = isOnThisDay
           ? (it.summaryHtml || '')
-          : ((isIthome || isPotd) ? '' : (it.summaryHtml ? await sanitizeSummaryHtml(it.summaryHtml, it.notificationText, baseUrl, sk, 0) : ''));
+          : (isIthome ? '' : (it.summaryHtml ? await sanitizeSummaryHtml(it.summaryHtml, it.notificationText, baseUrl, sk, 0) : ''));
 
         // Rebuild notificationText from the normalized summaryHtml (migrates old stored values)
         const description = it.description || '';
@@ -854,8 +848,6 @@ export default {
         };
       }));
 
-      // Persist migrated/normalized history back to KV
-      await putStateJson(env, HISTORY_KEY, items);
       return json({ ok: true, items });
     }
 

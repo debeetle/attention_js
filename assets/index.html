@@ -38,9 +38,8 @@
         html,
         body {
             -webkit-overflow-scrolling: touch;
-            scrollbar-width: none;
+            /* scrollbar-width: none; */
             font-family: 'Universal';
-            touch-action: manipulation;
             /* margin: 0; */
         }
 
@@ -82,8 +81,6 @@
             margin-top: 0.5rem;
         }
 
-
-
         .picture {
             display: block;
             width: 100%;
@@ -107,18 +104,20 @@
             bottom: 0;
             padding: 0.5rem;
             color: white;
-            font-size: 0.9rem;
-            background-color: rgba(255, 255, 255, 0.2);
+            font-family: sans-serif;
+            font-size: 0.8rem;
+            /* background-color: rgba(255, 255, 255, 0.2); */
+            background-color: rgba(50, 50, 50, 1.0);
             -webkit-backdrop-filter: blur(1rem);
             backdrop-filter: blur(1rem);
-            box-shadow:
-                inset 0 1px 2px rgba(255, 255, 255, 0.6),
-                inset 0 0.5rem 1rem rgba(3, 7, 18, 0.2),
-                0px 0px 0px rgba(3, 7, 18, 0.10),
+            /* box-shadow:
+                inset 0 1px 1px rgba(255, 255, 255, 0.6),
+                inset 0 0.5rem 1rem rgba(3, 7, 18, 0.2); */
+            /* 0px 0px 0px rgba(3, 7, 18, 0.10),
                 0px 0px 1px rgba(3, 7, 18, 0.08),
                 0px 0px 2px rgba(3, 7, 18, 0.06),
                 0px 0px 3px rgba(3, 7, 18, 0.04),
-                0px 0px 4px rgba(3, 7, 18, 0.02);
+                0px 0px 4px rgba(3, 7, 18, 0.02); */
         }
 
         .annotated-picture-list {
@@ -135,26 +134,20 @@
             border-color: rgb(from currentColor r g b / 20%);
         }
 
-        /* .otd-p-heading {
-            margin-top: 0;
-            margin-bottom: 0;
-        } */
-
         ul {
             padding-left: 1rem;
         }
 
-        /* wiki onthisday end */
-
         nav {
             touch-action: none;
+            cursor: pointer;
+            overflow: hidden;
             position: fixed;
-            /* bottom: calc(env(safe-area-inset-bottom, 0px) + var(--nav-viewport-bottom-inset)); */
             bottom: env(safe-area-inset-bottom, 0px);
             left: 22px;
             height: 3.5rem;
             width: 3.5rem;
-            z-index: 1;
+            z-index: 10;
             border-color: none;
             border-radius: 50%;
             background-color: rgba(250, 250, 250, 0.05);
@@ -169,7 +162,7 @@
                 0px 2px 4px rgb(from currentColor r g b / 6%),
                 0px 3px 6px rgb(from currentColor r g b / 4%),
                 0px 4px 8px rgb(from currentColor r g b / 2%);
-            transition: 
+            transition:
                 width 0.4s cubic-bezier(0.25, 0.8, 0.25, 1.2),
                 height 0.4s cubic-bezier(0.25, 0.8, 0.25, 1.2),
                 border-radius 0.2s ease,
@@ -181,15 +174,16 @@
             position: absolute;
             inset: 0;
             margin: auto;
-            width: 1.2rem;
-            height: 1.2rem;
+            width: 1.4rem;
+            height: 1.4rem;
             background: none;
-            border: 2px solid currentColor;
-            border-radius: 4px;
+            border: 1.5px solid currentColor;
+            border-radius: 6px;
             opacity: 0.3;
-            transition: opacity 0.2s ease;
+            transition: opacity 0.1s ease;
             pointer-events: none;
         }
+
         nav.open::after {
             opacity: 0;
         }
@@ -199,7 +193,7 @@
             width: 12rem;
             border-radius: var(--main-borderadius);
             padding: 8px;
-            background: rgba(255, 255, 255, 0.2);
+            background-color: rgba(255, 255, 255, 0.1);
             backdrop-filter: blur(1.5rem);
             box-shadow:
                 inset 0 1px 2px white,
@@ -220,36 +214,34 @@
             gap: 1rem;
             padding: 0.5rem;
             list-style: none;
-            background: none;
+            /* background: none; */
             font-family: sans-serif;
             font-weight: bold;
             border-radius: calc(var(--main-borderadius) - 8px);
-            cursor: pointer;
-            transition: 
-            background 0.2s ease;
+            /* cursor: pointer; */
+            transition: background-color 0.1s ease;
         }
 
         nav.open li {
             visibility: visible;
         }
 
-        nav li img {
+        nav.open li img {
             width: 1.5rem;
             height: 1.5rem;
         }
 
-        nav li.selected {
-            background: rgba(0, 0, 0, 0.2);
+        nav.open li.selected {
+            background-color: rgba(0, 0, 0, 0.2);
             /* color: blue; */
         }
-
     </style>
 </head>
 
 <body>
     <div id="permission-grant"></div>
+    <div id="history" style="touch-action: pan-y"></div>
     <nav></nav>
-    <div id="history"></div>
 
     <script>
         const HISTORY_DB_NAME = 'attention';
@@ -385,14 +377,7 @@
                 overlay.className = 'picture-overlay';
 
                 if (isPotd && (item.description || item.summaryHtml)) {
-                    const fallback = (() => {
-                        const d = document.createElement('div');
-                        d.innerHTML = item.summaryHtml;
-                        const t = (d.textContent || '').trim();
-                        const i = t.search(/[.!?。！？]/);
-                        return i >= 0 ? t.slice(0, i + 1) : t;
-                    })();
-                    const first = (item.description || fallback || '').trim();
+                    const first = (item.description || '').trim();
                     if (first) {
                         const title = document.createElement('div');
                         title.textContent = first;
@@ -568,42 +553,66 @@
             }
         }
 
-        window.addEventListener('load', async () => {
+        window.addEventListener('DOMContentLoaded', async () => {
             const registerBtn = document.getElementById('permission-grant');
 
             // Build source picker from SOURCE_META
             const nav = document.querySelector('nav');
 
             const entries = [{ key: '', label: 'All', logo: null },
-                ...Object.entries(SOURCE_META).map(([sk, m]) => ({ key: sk, label: sk, logo: m.logo }))];
+            ...Object.entries(SOURCE_META).map(([sk, m]) => ({ key: sk, label: sk, logo: m.logo }))];
             for (const { key, label, logo } of entries) {
                 const li = document.createElement('li');
                 li.dataset.key = key;
                 if (logo) { const img = document.createElement('img'); img.src = logo; li.appendChild(img); }
                 li.appendChild(document.createTextNode(label));
-                nav.appendChild(li);                
+                nav.appendChild(li);
             }
 
-            nav.addEventListener('touchstart', (e) => {
-                e.preventDefault();
-                nav.classList.add('open');
+            let activePointerId = null;
+
+            function navworkaround(e) {
+                if (e.pointerId === activePointerId) cleanup()
+            }
+
+            nav.addEventListener('pointerdown', (e) => {
+                if (activePointerId === null) {
+                    activePointerId = e.pointerId;
+                    nav.classList.add('open');
+                    nav.setPointerCapture(e.pointerId);
+
+                    document.addEventListener('pointerup', navworkaround, { capture: true, passive: true });
+
+                    document.addEventListener('pointercancel', navworkaround, { capture: true, passive: true });
+                }
             });
-            nav.addEventListener('touchmove', (e) => {
-                e.preventDefault();
-                const t = e.touches[0];
-                const el = document.elementFromPoint(t.clientX, t.clientY);
-                nav.querySelectorAll('li').forEach(li => li.classList.toggle('selected', li === el || li.contains(el)));
+
+            nav.addEventListener('pointermove', (e) => {
+                if (e.pointerId !== activePointerId) return;
+
+                const el = document.elementFromPoint(e.clientX, e.clientY);
+                nav.querySelectorAll('li').forEach(li =>
+                    li.classList.toggle('selected', li === el || li.contains(el))
+                );
                 const key = el?.closest('li')?.dataset.key;
-                if (key !== undefined) { activeSource = key; renderHistory(allItems); }
+                if (key !== undefined && key != activeSource) {
+                    activeSource = key;
+                    renderHistory(allItems);
+                }
             });
-            nav.addEventListener('touchend', (e) => {
-                nav.classList.remove('open');
-                syncHistory();
-            });
-            nav.addEventListener('touchcancel', (e) => {
+
+            function cleanup() {
                 nav.classList.remove('open');
                 nav.querySelectorAll('li').forEach(li => li.classList.remove('selected'));
-            });
+                if (activePointerId !== null) {
+                    try {
+                        nav.releasePointerCapture(activePointerId);
+                    } catch (e) { }
+                }
+                activePointerId = null;
+                document.removeEventListener('pointerup', navworkaround);
+                document.removeEventListener('pointercancel', navworkaround);
+            }
 
             renderLocalHistory();
             syncHistory();
@@ -618,7 +627,7 @@
 
             if (Notification.permission === 'default') {
                 if (registerBtn) {
-                    // registerBtn.style.display = 'inline-block';
+                    registerBtn.style.display = 'inline-block';
                     registerBtn.addEventListener('click', subscribe, { once: true });
                 }
                 return;
@@ -636,6 +645,162 @@
             }
         });
     </script>
+
+    <!-- <script id="debug-touch">
+        (function () {
+            if (document.getElementById('debug-touch-overlay')) return;
+            const overlay = document.createElement('div');
+            overlay.id = 'debug-touch-overlay';
+            Object.assign(overlay.style, {
+                position: 'fixed',
+                right: '8px',
+                top: '8px',
+                width: '320px',
+                maxHeight: '50vh',
+                overflow: 'auto',
+                zIndex: 999999,
+                background: 'rgba(0,0,0,0.8)',
+                color: 'white',
+                fontSize: '12px',
+                fontFamily: 'monospace',
+                padding: '8px',
+                borderRadius: '8px'
+            });
+
+            const header = document.createElement('div');
+            header.style.display = 'flex';
+            header.style.gap = '8px';
+            header.style.marginBottom = '6px';
+
+            const clearBtn = document.createElement('button');
+            clearBtn.textContent = 'Clear';
+            clearBtn.style.cursor = 'pointer';
+            clearBtn.style.fontSize = '12px';
+
+            const removeBtn = document.createElement('button');
+            removeBtn.textContent = 'Remove debug';
+            removeBtn.style.cursor = 'pointer';
+            removeBtn.style.fontSize = '12px';
+
+            header.appendChild(clearBtn);
+            header.appendChild(removeBtn);
+
+            const list = document.createElement('div');
+            overlay.appendChild(header);
+            overlay.appendChild(list);
+            document.body.appendChild(overlay);
+
+            clearBtn.onclick = () => (list.innerHTML = '');
+            removeBtn.onclick = removeAll;
+
+            const targets = [
+                { el: document, name: 'document' },
+                { el: document.getElementById('history'), name: '#history' },
+                { el: document.querySelector('nav'), name: 'nav' }
+            ].filter(t => t.el);
+
+            function log(targetName, ev) {
+                const ts = new Date().toISOString().slice(11,23);
+                const targetId = (ev && ev.target && (ev.target.id || ev.target.className || ev.target.tagName)) || '-';
+                const def = ev && ev.defaultPrevented ? 'true' : 'false';
+                const cancel = ev && ev.cancelable ? 'true' : 'false';
+                const pid = (ev && ev.pointerId !== undefined) ? ev.pointerId : '-';
+                const cx = ev && (ev.clientX !== undefined ? ev.clientX : '-');
+                const cy = ev && (ev.clientY !== undefined ? ev.clientY : '-');
+                const typ = ev && ev.type ? ev.type : String(ev && ev.type) || '-';
+                const extra = ev && ev.hasCapture !== undefined ? ` hasCapture=${ev.hasCapture}` : '';
+                const info = `${ts} ${targetName} ${typ} target=${targetId} defaultPrevented=${def} cancelable=${cancel} pointerId=${pid} client=(${cx},${cy})${extra}`;
+                const entry = document.createElement('div');
+                entry.textContent = info;
+                entry.style.padding = '2px 0';
+                list.insertBefore(entry, list.firstChild);
+                while (list.childElementCount > 200) list.removeChild(list.lastChild);
+                console.info(info, ev);
+            }
+
+            const evNames = ['pointerdown','pointermove','pointerup','pointercancel','touchstart','touchmove','touchend','click'];
+
+            const listeners = [];
+            for (const t of targets) {
+                for (const name of evNames) {
+                    const onEv = function (ev) {
+                        try { log(t.name, ev); } catch (e) {}
+                    };
+                    t.el.addEventListener(name, onEv, { capture: true, passive: false });
+                    t.el.addEventListener(name, onEv, { capture: false, passive: false });
+                    listeners.push({ el: t.el, name, onEv, opts: { capture: true } });
+                    listeners.push({ el: t.el, name, onEv, opts: { capture: false } });
+                }
+            }
+
+            const nav = document.querySelector('nav');
+            if (nav) {
+                const intervalId = setInterval(function captureStateCheck() {
+                    try {
+                        const pid = window.activePointerId ?? window.__activePointerId ?? overlay.dataset.guessPointerId ?? null;
+                        const has = (pid !== null && typeof nav.hasPointerCapture === 'function') ? nav.hasPointerCapture(pid) : 'unknown';
+                        log('nav', { type: 'capture-check', target: nav, defaultPrevented: false, cancelable: false, pointerId: pid, clientX: '-', clientY: '-', hasCapture: has });
+                    } catch (e) {
+                        log('nav', { type: 'capture-check-error', pointerId: '-', defaultPrevented: false, cancelable: false });
+                    }
+                }, 1000);
+                overlay.dataset.intervalId = String(intervalId);
+            }
+
+            try {
+                if (nav && typeof nav.setPointerCapture === 'function' && !nav.__dbg_patched) {
+                    const origSet = nav.setPointerCapture.bind(nav);
+                    const origRelease = nav.releasePointerCapture.bind(nav);
+                    nav.setPointerCapture = function(pid) {
+                        log('nav', { type: 'setPointerCapture', pointerId: pid, target: nav });
+                        overlay.dataset.guessPointerId = String(pid);
+                        return origSet(pid);
+                    };
+                    nav.releasePointerCapture = function(pid) {
+                        log('nav', { type: 'releasePointerCapture', pointerId: pid, target: nav });
+                        if (overlay.dataset.guessPointerId === String(pid)) delete overlay.dataset.guessPointerId;
+                        return origRelease(pid);
+                    };
+                    nav.__dbg_patched = true;
+                }
+            } catch (e) {}
+
+            function tryDumpActivePointer() {
+                try {
+                    const ap = (window.activePointerId !== undefined) ? window.activePointerId : (window.__activePointerId !== undefined ? window.__activePointerId : null);
+                    if (ap !== null && ap !== undefined) {
+                        const ent = document.createElement('div');
+                        ent.textContent = `activePointerId (global guess) = ${ap}`;
+                        ent.style.opacity = '0.7';
+                        list.insertBefore(ent, list.firstChild);
+                    }
+                } catch (e) {}
+            }
+            const dumpInterval = setInterval(tryDumpActivePointer, 2000);
+            overlay.dataset.dumpInterval = String(dumpInterval);
+
+            function removeAll() {
+                for (const { el, name, onEv, opts } of listeners) {
+                    try { el.removeEventListener(name, onEv, opts); } catch (e) {}
+                }
+                const id = Number(overlay.dataset.intervalId);
+                if (id) clearInterval(id);
+                const di = Number(overlay.dataset.dumpInterval);
+                if (di) clearInterval(di);
+                if (nav && nav.__dbg_patched) {
+                    try {
+                        delete nav.__dbg_patched;
+                    } catch (e) {}
+                }
+                overlay.remove();
+                const script = document.getElementById('debug-touch');
+                if (script) script.remove();
+                try { delete window.__removeDebugTouch; } catch (e) {}
+            }
+
+            window.__removeDebugTouch = removeAll;
+        })();
+        </script> -->
 
 </body>
 
