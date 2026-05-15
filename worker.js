@@ -22,7 +22,7 @@ const DEFAULT_RSS_SOURCES = [
     includeKeywords: [], excludeKeywords: [],
     sendCrons: ['0 0,4,8,12 * * *'], refreshCrons: ['0 0,4,8,12 * * *'] },
   { sourceKey: 'ithome', feedUrl: 'https://www.ithome.com/rss/',
-    includeKeywords: ["苹果", "微软", "谷歌"], excludeKeywords: ['追觅', '鸿蒙智', '鼠标', '电影票房', '荣耀'],
+    includeKeywords: ["苹果", "微软", "谷歌"], excludeKeywords: ['追觅', '鸿蒙智', '鼠标', '电影票房', '荣耀', '券'],
     sendCrons: ['0 0,4,8,12 * * *'], refreshCrons: ['0 0,4,8,12 * * *'] }
 ];
 
@@ -30,7 +30,7 @@ const FEED_XML_PARSER = new XMLParser({
   ignoreAttributes: false, attributeNamePrefix: '',
   trimValues: false, parseTagValue: false, parseAttributeValue: false,
   processEntities: false, cdataPropName: '__cdata',
-  stopNodes: ['*.summary', '*.content', '*.description']
+  stopNodes: ['*.summary', '*.description', '*.content']
 });
 
 // Tags whose content is kept but the tag itself is removed (unwrap).
@@ -41,7 +41,7 @@ const DROP_ATTRIBUTES = new Set(['style', 'class', 'title']);
 
 const SOURCE_DISPLAY_NAMES = {
   'picture of the day': '[Potd]', 'on this day': '[Otd]', 'do you know': '[Dyk]',
-  'sspai': '[Sspai]', 'ithome': '[IThome]', 'weather': '[Weather]'
+  'sspai': '[Pai]', 'ithome': '[IThome]', 'weather': '[Weather]'
 };
 
 // ---------------------------------------------------------------------------
@@ -83,10 +83,6 @@ async function hmacHex(secret, data, hash = 'SHA-256') {
 // ---------------------------------------------------------------------------
 const splitCsv = v => (v || '').split(',').map(s => s.trim()).filter(Boolean);
 
-const escapeHtml = s => (s || '')
-  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-
 function toAbsoluteUrl(url, base = '') {
   if (!url) return '';
   if (url.startsWith('//')) return `https:${url}`;
@@ -99,7 +95,7 @@ function safeOrigin(url) {
   catch { return ''; }
 }
 
-function truncateToSentence(text, maxLen = 10) {
+function truncateToSentence(text, maxLen = 5) {
   const s = (text || '').replace(/\s+/g, ' ').trim();
   if (s.length <= maxLen) return s;
   const cut = s.slice(0, maxLen);
@@ -107,8 +103,6 @@ function truncateToSentence(text, maxLen = 10) {
     cut.lastIndexOf('。'), cut.lastIndexOf('！'), cut.lastIndexOf('？'));
   return end >= 20 ? `${cut.slice(0, end + 1).trim()}...` : `${cut.trim()}...`;
 }
-
-
 
 const safeEqual = (a, b) => {
   if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
@@ -186,16 +180,16 @@ class SummaryElementSanitizer {
 }
 
 /** HTMLRewriter document handler: strips HTML comments. */
-class SummaryDocumentSanitizer {
-  comments(comment) { comment.remove(); }
-}
+// class CommentFilter {
+//   comments(comment) { comment.remove(); }
+// }
 
 /**
  * Parse raw summary HTML, sanitise it, and optionally truncate to
  * `maxSentences` (0 = no truncation).
  */
 async function sanitizeSummaryHtml(rawHtml, fallbackText, baseUrl = '', sourceKey = '', maxSentences = 3) {
-  if (!rawHtml) return fallbackText ? `<p>${escapeHtml(fallbackText)}</p>` : '';
+  if (!rawHtml) return fallbackText ? `<p>${fallbackText}</p>` : '';
 
   // Pre-clean first, then decode entities, then filter tags/attrs via HTMLRewriter.
   // This keeps responsibilities separate and avoids recreating filtered tags after sanitize.
@@ -209,13 +203,13 @@ async function sanitizeSummaryHtml(rawHtml, fallbackText, baseUrl = '', sourceKe
   try {
     safe = await new HTMLRewriter()
       .on('*', new SummaryElementSanitizer(baseUrl))
-      .onDocument(new SummaryDocumentSanitizer())
+    //   .onDocument(new CommentFilter())
       .transform(new Response(decoded, { headers: { 'Content-Type': 'text/html; charset=utf-8' } }))
       .text();
-  } catch { return fallbackText ? `<p>${escapeHtml(fallbackText)}</p>` : ''; }
+  } catch { return fallbackText ? `<p>${fallbackText}</p>` : ''; }
 
   safe = (safe || '').trim();
-  if (!safe) return fallbackText ? `<p>${escapeHtml(fallbackText)}</p>` : '';
+  if (!safe) return fallbackText ? `<p>${fallbackText}</p>` : '';
 
   // Wikipedia featured-content feeds have structured blurbs that
   // should be shown in full rather than truncated to N sentences.
@@ -285,12 +279,12 @@ function truncateSanitizedHtml(html, maxSentences) {
 // ---------------------------------------------------------------------------
 const asArray = v => (v == null ? [] : Array.isArray(v) ? v : [v]);
 
-/** Extract text from a fast-xml-parser node (handles #text, __cdata, arrays). */
-function xmlText(node) {
-  if (node == null) return '';
-  if (typeof node === 'string' || typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(xmlText).filter(Boolean).join(' ').trim();
-  if (typeof node === 'object') return String(node['#text'] || node.__cdata || '').trim();
+/** Extract raw text from fast-xml-parser output (strings, arrays, #text, __cdata). */
+function xmlText(value) {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map(xmlText).filter(Boolean).join(' ');
+  if (typeof value === 'object') return String(value['#text'] || value.__cdata || '');
   return '';
 }
 
@@ -316,14 +310,14 @@ function decodeXmlEntities(str) {
   });
 }
 
-/** Extract raw HTML from a fast-xml-parser node, decoding XML entities. */
-function xmlHtml(node) {
-  if (node == null) return '';
-  if (typeof node === 'string' || typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(xmlHtml).filter(Boolean).join('');
-  if (typeof node === 'object') {
-        if (typeof node.__cdata === 'string') return node.__cdata;
-        if (typeof node['#text'] === 'string') return node['#text'];
+/** Extract raw HTML from fast-xml-parser output (strings, arrays, #text, __cdata). */
+function xmlHtml(value) {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map(xmlHtml).filter(Boolean).join('');
+  if (typeof value === 'object') {
+        if (typeof value.__cdata === 'string') return value.__cdata;
+        if (typeof value['#text'] === 'string') return value['#text'];
   }
   return '';
 }
@@ -332,10 +326,10 @@ function xmlHtml(node) {
 function resolveFeedLink(linkNode, baseUrl = '') {
   for (const link of asArray(linkNode)) {
     if (typeof link === 'object' && link.href) {
-      const href = xmlText(link.href), rel = (xmlText(link.rel) || '').toLowerCase();
+      const href = xmlText(link.href).trim(), rel = xmlText(link.rel).trim().toLowerCase();
       if (href && (!rel || rel === 'alternate')) return toAbsoluteUrl(href, baseUrl);
     } else {
-      const href = xmlText(link);
+      const href = xmlText(link).trim();
       if (href) return toAbsoluteUrl(href, baseUrl);
     }
   }
@@ -343,7 +337,7 @@ function resolveFeedLink(linkNode, baseUrl = '') {
 }
 
 /** Extract the first <img> src from an HTML snippet using regex. */
-function extractFirstImageSrc(html, baseUrl = '') {
+function extractImageUrl(html, baseUrl = '') {
   if (!html) return '';
   const normalizedHtml = decodeXmlEntities(String(html))
     .replace(/\\\//g, '/')
@@ -357,15 +351,15 @@ function extractFirstImageSrc(html, baseUrl = '') {
 function parseFeedItemBase(itemNode, feedBaseUrl, sourceKey) {
   const isIthome = sourceKey === 'ithome';
   const title = xmlText(itemNode.title).replace(/<[^>]+>/g, '').trim();
-  const link = resolveFeedLink(itemNode.link, feedBaseUrl) || toAbsoluteUrl(xmlText(itemNode.link), feedBaseUrl);
-  const itemId = xmlText(itemNode.id || itemNode.guid) || link;
-  const publishedAt = xmlText(itemNode.updated || itemNode.published || itemNode.pubDate);
+  const link = resolveFeedLink(itemNode.link, feedBaseUrl) || toAbsoluteUrl(xmlText(itemNode.link).trim(), feedBaseUrl);
+  const itemId = xmlText(itemNode.id || itemNode.guid).trim() || link;
+  const publishedAt = xmlText(itemNode.updated || itemNode.published || itemNode.pubDate).trim();
   const summaryHtmlNode = xmlHtml(itemNode.summary);
   const contentHtmlNode = xmlHtml(itemNode.content);
   const descriptionHtmlNode = xmlHtml(itemNode.description);
   const rawHtml = isIthome ? '' : (summaryHtmlNode || contentHtmlNode || descriptionHtmlNode);
   const imageScanHtml = [summaryHtmlNode, contentHtmlNode, descriptionHtmlNode].filter(Boolean).join(' ');
-  const imageUrl = extractFirstImageSrc(imageScanHtml || rawHtml, feedBaseUrl || link);
+  const imageUrl = extractImageUrl(imageScanHtml || rawHtml, feedBaseUrl || link);
   const description = isIthome ? title : truncateToSentence(rawHtml.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim(), 180);
   return { title, link, itemId, publishedAt, rawHtml, imageUrl, description };
 }
@@ -685,7 +679,7 @@ function buildRainAlertItem(forecast) {
   const details = [rainy.text, rainy.pop ? `PoP ${rainy.pop}%` : '', Number(rainy.precip || 0) > 0 ? `Precip ${rainy.precip} mm` : ''].filter(Boolean).join(' · ');
   const summary = `Weather expected by ${fxTime}. ${details}`.trim();
 
-  return { title: 'Weather', description: summary, summaryText: summary, summaryHtml: `<p>${escapeHtml(summary)}</p>`,
+  return { title: 'Weather', description: summary, summaryText: summary, summaryHtml: `<p>${summary}</p>`,
     link: '', imageUrl: '', itemId: rainy.fxTime, publishedAt: rainy.fxTime };
 }
 
@@ -825,7 +819,7 @@ export default {
 
         let imageUrl = isIthome ? '' : (it.imageUrl || '');
         if (!imageUrl && safeSummary) {
-          imageUrl = extractFirstImageSrc(safeSummary, baseUrl);
+          imageUrl = extractImageUrl(safeSummary, baseUrl);
         }
         // Update the deduped item in-place so that the KV gets migrated
         it.description = description;
