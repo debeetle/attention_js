@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<!-- <html lang="en"> -->
 
 <head>
     <meta charset="UTF-8">
@@ -13,16 +13,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black">
     <meta name="apple-mobile-web-app-title" content="Attention">
     <style>
-        #permission-grant {
-            display: none;
-            font-family: sans-serif;
-            padding: 0.5rem;
-            width: 100%;
-            box-sizing: border-box;
-            text-align: center;
-            background-color: purple;
-        }
-
+        /* Fonts */
         @font-face {
             font-family: 'Universal';
             src: url('font/latinmodern-math.otf');
@@ -35,107 +26,96 @@
             unicode-range: U+4E00-9FFF;
         }
 
-        html,
-        body {
-            -webkit-overflow-scrolling: touch;
-            /* scrollbar-width: none; */
-            font-family: 'Universal';
-            /* margin: 0; */
-        }
-
         :root {
             color-scheme: light dark;
             --main-borderadius: 18px;
             --main-pad: 12px;
-            /* --nav-viewport-bottom-inset: 0px; */
         }
 
-        .notification {
-            margin: 1rem 0 1rem 0;
+        .permission-grant {
+            display: inline-block;
+            font-family: sans-serif;
+            padding: 0.5rem;
+            width: 100%;
+            box-sizing: border-box;
+            text-align: center;
+            background-color: purple;
+        }
+
+        html, body {
+            -webkit-overflow-scrolling: touch;
+            font-family: 'Universal';
+        }
+
+        a { text-decoration: none; }
+        ul { padding-left: 1rem; }
+
+        .favicon { display: block; width: auto; height: 1.5rem; }
+        .visible { display: inline-block; }
+
+        /* Use native CSS Nesting */
+        .item {
+            margin: 1rem 0;
             padding: var(--main-pad);
             border: 1px solid;
             border-color: rgb(from currentColor r g b / 60%);
             border-radius: var(--main-borderadius);
-            /* overflow-wrap: anywhere; */
             max-width: 30rem;
-        }
 
-        a {
-            text-decoration: none;
-        }
+            & .meta {
+                font-family: sans-serif;
+                font-size: 0.8rem;
+                font-weight: bold;
+                color: #ccc;
+                display: flex;
+                justify-content: space-between;
+                align-items: end;
+                margin-top: 0.5rem;
+            }
 
-        .favicon {
-            display: block;
-            width: auto;
-            height: 1.5rem;
-        }
+            & .media {
+                position: relative;
+                border-radius: calc(var(--main-borderadius) - var(--main-pad));
+                overflow: hidden;
+                border: 1px solid;
+                border-color: rgb(from currentColor r g b / 20%);
 
-        .notification-meta {
-            font-family: sans-serif;
-            font-size: 0.8rem;
-            font-weight: bold;
-            color: #ccc;
-            display: flex;
-            justify-content: space-between;
-            align-items: end;
-            margin-top: 0.5rem;
-        }
+                & .image {
+                    display: block;
+                    width: 100%;
+                    max-height: 20rem;
+                    object-fit: cover;
+                    background: white;
+                }
 
-        .picture {
-            display: block;
-            width: 100%;
-            max-height: 20rem;
-            object-fit: cover;
-            background: white;
-        }
+                & .caption {
+                    position: absolute;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
+                    padding: 0.5rem;
+                    color: white;
+                    font-family: sans-serif;
+                    font-size: 0.8rem;
+                    background-color: rgba(50, 50, 50, 1.0);
+                    -webkit-backdrop-filter: blur(1rem);
+                    backdrop-filter: blur(1rem);
+                }
+            }
 
-        .picture-wrap {
-            position: relative;
-            border-radius: calc(var(--main-borderadius) - var(--main-pad));
-            overflow: hidden;
-            border: 1px solid;
-            border-color: rgb(from currentColor r g b / 20%);
-        }
+            & .annotated {
+                display: grid;
+                grid-template-columns: auto 45%;
+                gap: 0.5rem;
 
-        .picture-overlay {
-            position: absolute;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            padding: 0.5rem;
-            color: white;
-            font-family: sans-serif;
-            font-size: 0.8rem;
-            /* background-color: rgba(255, 255, 255, 0.2); */
-            background-color: rgba(50, 50, 50, 1.0);
-            -webkit-backdrop-filter: blur(1rem);
-            backdrop-filter: blur(1rem);
-            /* box-shadow:
-                inset 0 1px 1px rgba(255, 255, 255, 0.6),
-                inset 0 0.5rem 1rem rgba(3, 7, 18, 0.2); */
-            /* 0px 0px 0px rgba(3, 7, 18, 0.10),
-                0px 0px 1px rgba(3, 7, 18, 0.08),
-                0px 0px 2px rgba(3, 7, 18, 0.06),
-                0px 0px 3px rgba(3, 7, 18, 0.04),
-                0px 0px 4px rgba(3, 7, 18, 0.02); */
-        }
-
-        .annotated-picture-list {
-            display: grid;
-            grid-template-columns: auto 45%;
-            gap: 0.5rem;
-        }
-
-        .annotated-picture {
-            display: block;
-            max-width: 100%;
-            border-radius: 6px;
-            border: 1px solid;
-            border-color: rgb(from currentColor r g b / 20%);
-        }
-
-        ul {
-            padding-left: 1rem;
+                & .image {
+                    display: block;
+                    max-width: 100%;
+                    border-radius: 6px;
+                    border: 1px solid;
+                    border-color: rgb(from currentColor r g b / 20%);
+                }
+            }
         }
 
         nav {
@@ -151,95 +131,82 @@
             border-color: none;
             border-radius: 50%;
             background-color: rgba(255, 255, 255, 0.2);
-            backdrop-filter: blur(0.5rem);
-            box-shadow:
-                /* inset 0 1px 1px white, */
-                inset 0 5px 10px rgba(3, 7, 18, 0.1),
-                inset 0 -5px 10px rgba(255, 255, 255, 0.1),
-                inset 0 -1px 2px white,
-                0px 0px 0px rgb(from currentColor r g b / 10%),
-                0px 1px 2px rgb(from currentColor r g b / 8%),
-                0px 2px 4px rgb(from currentColor r g b / 6%),
-                0px 3px 6px rgb(from currentColor r g b / 4%),
-                0px 4px 8px rgb(from currentColor r g b / 2%);
-            transition:
-                width 0.4s cubic-bezier(0.25, 0.8, 0.25, 1.2),
-                height 0.4s cubic-bezier(0.25, 0.8, 0.25, 1.2),
-                border-radius 0.2s ease,
-                background-color 0.2s ease;
-        }
+            background-color: color(display-p3 1 1 1 / 0.2);
+            /* background: 
+            radial-gradient(
+            circle at 50% 15%, 
+            rgba(255, 255, 255, 0.1), 
+            rgba(255, 255, 255, 0.2)); */
+            backdrop-filter: blur(0.4rem);
+            box-shadow: 
+                inset 0 3px 5px -3px color(display-p3 1 1 1),
+                inset 0 1px 8px -1px rgba(3, 7, 18 , 0.2), 
+                /* inset 0 -5px 8px -5px rgba(255, 255, 255, 0.5),  */
+                /* inset 0 -5px 8px -5px color(display-p3 1 1 1 / 0.5), */
+                inset 0 -5px 8px -5px rgba(255, 255, 255, 0.4),
+                0px 0px 1px rgb(from currentColor r g b / 10%), 
+                0px 0px 2px rgb(from currentColor r g b / 8%),
+                0px 0px 4px rgb(from currentColor r g b / 6%), 
+                0px 0px 6px rgb(from currentColor r g b / 4%), 
+                0px 0px 8px rgb(from currentColor r g b / 2%);
+            transition: width 0.4s cubic-bezier(0.25, 0.8, 0.25, 1.2), height 0.4s cubic-bezier(0.25, 0.8, 0.25, 1.2), border-radius 0.2s ease, background-color 0.2s ease;
 
-        nav::after {
-            content: '';
-            position: absolute;
-            inset: 0;
-            margin: auto;
-            width: 1.4rem;
-            height: 1.4rem;
-            background: none;
-            border: 1.5px solid currentColor;
-            border-radius: 1px;
-            opacity: 0.3;
-            transition: opacity 0.1s ease;
-            pointer-events: none;
-        }
+            &::after {
+                content: '';
+                position: absolute;
+                inset: 0;
+                margin: auto;
+                width: 1rem;
+                height: 1rem;
+                background: none;
+                border: 1.5px solid currentColor;
+                border-radius: 50%;
+                corner-shape: squircle;
+                opacity: 0.3;
+                transition: opacity 0.1s ease;
+                pointer-events: none;
+            }
+            
+            & li {
+                visibility: hidden;
+                display: flex;
+                align-items: center;
+                gap: 1rem;
+                padding: 0.5rem;
+                list-style: none;
+                font-family: sans-serif;
+                font-weight: bold;
+                border-radius: calc(var(--main-borderadius) - 8px);
+                transition: background-color 0.1s ease;
+            }
 
-        nav.open::after {
-            opacity: 0;
-        }
-
-        nav.open {
-            height: 16rem;
-            width: 12rem;
-            border-radius: var(--main-borderadius);
-            padding: 8px;
-            background-color: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(1.5rem);
-            box-shadow:
-                /* inset 0 1px 2px white, */
-                inset 0 5px 10px rgba(3, 7, 18, 0.1),
-                inset 0 -5px 10px rgba(255, 255, 255, 0.1),
-                inset 0 -1px 2px white,
-                0px 0px 0px rgb(from currentColor r g b / 10%),
-                0px 1px 2px rgb(from currentColor r g b / 8%),
-                0px 2px 4px rgb(from currentColor r g b / 6%),
-                0px 3px 6px rgb(from currentColor r g b / 4%),
-                0px 4px 8px rgb(from currentColor r g b / 2%);
-        }
-
-        nav li {
-            visibility: hidden;
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-            padding: 0.5rem;
-            list-style: none;
-            /* background: none; */
-            font-family: sans-serif;
-            font-weight: bold;
-            border-radius: calc(var(--main-borderadius) - 8px);
-            /* cursor: pointer; */
-            transition: background-color 0.1s ease;
-        }
-
-        nav.open li {
-            visibility: visible;
-        }
-
-        nav.open li img {
-            width: 1.5rem;
-            height: 1.5rem;
-        }
-
-        nav.open li.selected {
-            background-color: rgba(0, 0, 0, 0.2);
-            /* color: blue; */
+            &.open {
+                height: 16rem;
+                width: 12rem;
+                border-radius: var(--main-borderadius);
+                padding: 8px;
+                background-color: rgba(255, 255, 255, 0.1);
+                backdrop-filter: blur(1.5rem);
+                box-shadow: 
+                inset 0 0px 5px color(display-p3 1 1 1),
+                inset 0 0px 6px rgba(3, 7, 18, 0.2), 
+                /* inset 0 -5px 8px rgba(255, 255, 255, 0.2),  */
+                /* inset 0 -5px 8px color(display-p3 1 1 1 / 0.2), */
+                0px 0px 1px rgb(from currentColor r g b / 10%), 
+                0px 0px 2px rgb(from currentColor r g b / 8%),
+                0px 0px 4px rgb(from currentColor r g b / 6%),
+                0px 0px 6px rgb(from currentColor r g b / 4%), 
+                0px 0px 8px rgb(from currentColor r g b / 2%);
+                &::after { opacity: 0; }
+                & li { visibility: visible; }
+                & li img { width: 1.5rem; height: 1.5rem; }
+                & li.selected { background-color: rgba(0, 0, 0, 0.2); }
+            }
         }
     </style>
 </head>
 
 <body>
-    <div id="permission-grant"></div>
     <div id="history" style="touch-action: pan-y"></div>
     <nav></nav>
 
@@ -252,10 +219,9 @@
             'picture of the day': { logo: '/figure/Wikipedia-logo-v2.svg' },
             'on this day': { logo: '/figure/Wikipedia-logo-v2.svg' },
             'do you know': { logo: '/figure/Wikipedia-logo-v2.svg' },
-            'sspai': { logo: '/figure/sspai_400x400.png' },
+            'sspai': { logo: '/figure/sspai.svg' },
             'ithome': { logo: '/figure/IThome_logo.png' }
         };
-        let hasSubscribed = false;
         let PUBLIC_VAPID_KEY = '';
         let activeSource = '';
         let allItems = [];
@@ -355,17 +321,17 @@
 
         function buildNotification(item, index) {
             const notification = document.createElement('div');
-            notification.className = 'notification';
+            notification.className = 'item';
             const isOnThisDay = (item.sourceKey || '').toLowerCase() === 'on this day';
             const isIthome = (item.sourceKey || '').toLowerCase() === 'ithome';
             const isPotd = (item.sourceKey || '').toLowerCase() === 'picture of the day';
 
             if (item.imageUrl && !isOnThisDay) {
                 const pictureWrap = document.createElement('div');
-                pictureWrap.className = 'picture-wrap';
+                pictureWrap.className = 'media';
 
                 const picture = document.createElement('img');
-                picture.className = 'picture';
+                picture.className = 'image';
                 picture.src = item.imageUrl;
                 picture.alt = item.imageAlt || '';
                 picture.decoding = 'async';
@@ -374,7 +340,7 @@
                 pictureWrap.appendChild(picture);
 
                 const overlay = document.createElement('div');
-                overlay.className = 'picture-overlay';
+                overlay.className = 'caption';
 
                 if (isPotd && (item.description || item.summaryHtml)) {
                     const first = (item.description || '').trim();
@@ -408,11 +374,10 @@
 
         function appendMetaRow(parent, item) {
             const row = document.createElement('div');
-            row.className = 'notification-meta';
+            row.className = 'meta';
             const sourceMeta = SOURCE_META[(item.sourceKey || '').toLowerCase()] || {};
 
             const source = document.createElement('div');
-            source.className = 'notification-meta-source';
             source.textContent = (item.sourceKey || '') + ' ' + elapsedHoursText(item.publishedAt);
             row.appendChild(source);
 
@@ -453,14 +418,14 @@
         function appendOnThisDayBody(parent, item) {
             const heading = document.createElement('p');
             heading.innerHTML = item.title;
-            heading.style.marginTop = '0';
+            heading.style.marginTop = "0";
 
             const annotated = document.createElement('div');
-            annotated.className = 'annotated-picture-list';
+            annotated.className = 'annotated';
             const annotatedText = document.createElement('div');
             annotatedText.innerHTML = item.summaryHtml;
             const annotatedPic = document.createElement('img');
-            annotatedPic.className = 'annotated-picture';
+            annotatedPic.className = 'image';
             annotatedPic.src = item.imageUrl;
             annotated.appendChild(annotatedText);
             annotated.appendChild(annotatedPic);
@@ -521,21 +486,10 @@
         }
 
         async function subscribe() {
-            try {
-                if (hasSubscribed || !PUBLIC_VAPID_KEY) return;
+                const permission = await Notification.requestPermission();
+                if (permission !== 'granted') return;
 
-                if (Notification.permission === 'default') {
-                    const permission = await Notification.requestPermission();
-                    if (permission !== 'granted') return;
-                }
-
-                if (Notification.permission !== 'granted') return;
-
-                const existingSubscription = window.pushManager && typeof window.pushManager.getSubscription === 'function'
-                    ? await window.pushManager.getSubscription()
-                    : null;
-
-                const subscription = existingSubscription || await window.pushManager.subscribe({
+                const subscription = await window.pushManager.subscribe({
                     userVisibleOnly: true,
                     applicationServerKey: urlBase64ToUint8Array(PUBLIC_VAPID_KEY)
                 });
@@ -546,20 +500,15 @@
                     body: JSON.stringify(subscription)
                 });
 
-                hasSubscribed = true;
-                const registerBtn = document.getElementById('permission-grant');
-                if (registerBtn) registerBtn.style.display = 'none';
-            } catch {
-            }
+
         }
 
         window.addEventListener('DOMContentLoaded', async () => {
-            const registerBtn = document.getElementById('permission-grant');
 
             // Build source picker from SOURCE_META
             const nav = document.querySelector('nav');
 
-            const entries = [{ key: '', label: 'All', logo: null },
+            const entries = [{ key: '', label: 'Flow', logo: '/figure/Git_icon.svg' },
             ...Object.entries(SOURCE_META).map(([sk, m]) => ({ key: sk, label: sk, logo: m.logo }))];
             for (const { key, label, logo } of entries) {
                 const li = document.createElement('li');
@@ -626,22 +575,10 @@
             }
 
             if (Notification.permission === 'default') {
-                if (registerBtn) {
-                    registerBtn.style.display = 'inline-block';
-                    registerBtn.addEventListener('click', subscribe, { once: true });
-                }
-                return;
-            }
-
-            if (Notification.permission === 'granted') {
-                if (window.pushManager && typeof window.pushManager.getSubscription === 'function') {
-                    const existingSubscription = await window.pushManager.getSubscription();
-                    if (existingSubscription) {
-                        hasSubscribed = true;
-                        return;
-                    }
-                }
-                subscribe();
+                const registerBtn = document.createElement('div');
+                registerBtn.className = "permission-grant";
+                registerBtn.addEventListener('click', subscribe, { once: true });
+                registerBtn.style.display = "none";
             }
         });
     </script>

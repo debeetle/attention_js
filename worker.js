@@ -13,17 +13,17 @@ const QWEATHER_API_HOST = 'mh7mdaq86q.re.qweatherapi.com';
 
 const DEFAULT_RSS_SOURCES = [
   { sourceKey: 'picture of the day', feedUrl: 'https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=potd&feedformat=atom',
-    sendCrons: ['15 0 * * *'], refreshCrons: ['15 0 * * *'] },
+    crons: ['15 0 * * *'] },
   { sourceKey: 'on this day', feedUrl: 'https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=onthisday&feedformat=atom',
-    sendCrons: ['15 0 * * *'], refreshCrons: ['15 0 * * *'] },
+    crons: ['15 0 * * *'] },
   { sourceKey: 'do you know', feedUrl: 'https://zh.wikipedia.org/w/api.php?action=featuredfeed&feed=dyk&feedformat=atom',
-    sendCrons: ['15 0 * * *'], refreshCrons: ['15 0 * * *'] },
+    crons: ['15 0 * * *'] },
   { sourceKey: 'sspai', feedUrl: 'https://sspai.com/feed',
     includeKeywords: [], excludeKeywords: [],
-    sendCrons: ['0 0,4,8,12 * * *'], refreshCrons: ['0 0,4,8,12 * * *'] },
+    crons: ['0 0,4,8,12 * * *'] },
   { sourceKey: 'ithome', feedUrl: 'https://www.ithome.com/rss/',
-    includeKeywords: ["苹果", "微软", "谷歌"], excludeKeywords: ['追觅', '鸿蒙智', '鼠标', '电影票房', '荣耀', '券'],
-    sendCrons: ['0 0,4,8,12 * * *'], refreshCrons: ['0 0,4,8,12 * * *'] }
+    includeKeywords: ["苹果", "微软", "谷歌"], excludeKeywords: ['追觅', '鸿蒙智', '鼠标', '电影票房', '荣耀', '券', '智界','问界', '尊界', '抖音', '车型', '补贴', '联名', '月卡', '年卡'],
+    crons: ['0 0,4,8,12 * * *'] }
 ];
 
 const FEED_XML_PARSER = new XMLParser({
@@ -290,6 +290,7 @@ function xmlText(value) {
 
 /** Decode common XML/HTML entities and numeric character references. */
 function decodeXmlEntities(str) {
+  str = str.replace(/&amp;#160;/g, '&#160;');
   if (!str) return '';
   const named = {
     nbsp: '\u00A0', hellip: '\u2026', mdash: '\u2014', ndash: '\u2013',
@@ -299,7 +300,7 @@ function decodeXmlEntities(str) {
   };
 
   return String(str).replace(/&(#x[0-9a-fA-F]+|#\d+|[a-zA-Z]+);/g, (m, code) => {
-    if (!code) return m;
+    // if (!code) return m;
     if (code[0] === '#') {
       if (code[1] === 'x' || code[1] === 'X') return String.fromCodePoint(parseInt(code.slice(2), 16));
       return String.fromCodePoint(Number(code.slice(1)));
@@ -799,10 +800,10 @@ export default {
       }
 
       const items = await Promise.all(deduped.map(async it => {
-        const sk = it.sourceKey || '';
-        const isIthome = sk.toLowerCase() === 'ithome';
-        const isPotd = sk.toLowerCase() === 'picture of the day';
-        const isOnThisDay = sk.toLowerCase() === 'on this day';
+        const sk = it.sourceKey;
+        const isIthome = sk === 'ithome';
+        const isPotd = sk === 'picture of the day';
+        const isOnThisDay = sk === 'on this day';
 
         // Recompute/normalize summaryHtml from stored value.
         // Keep the same decode order as ingest path: sanitize first, decode inside sanitizer.
@@ -1014,8 +1015,7 @@ export default {
     }
 
     for (const cfg of DEFAULT_RSS_SOURCES) {
-      const shouldRun = (cfg.sendCrons || []).includes(controller.cron) || (cfg.refreshCrons || []).includes(controller.cron);
-      if (!shouldRun) continue;
+      if (!(cfg.crons || []).includes(controller.cron)) continue;
 
       try {
         const preview = await fetchFeedPreview(cfg.feedUrl);
