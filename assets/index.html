@@ -53,14 +53,17 @@
         .favicon { display: block; width: auto; height: 1.5rem; }
         .visible { display: inline-block; }
 
-        /* Use native CSS Nesting */
         .item {
             margin: 1rem 0;
             padding: var(--main-pad);
             border: 1px solid;
-            border-color: rgb(from currentColor r g b / 60%);
+            border-color: rgb(from currentColor r g b / 15%);
             border-radius: var(--main-borderadius);
-            max-width: 30rem;
+            max-width: 100%;
+            box-shadow:
+                0px 0px 1px rgb(from currentColor r g b / 3%), 
+                0px 0px 2px rgb(from currentColor r g b / 2%), 
+                0px 0px 3px rgb(from currentColor r g b / 1%);
 
             & .meta {
                 font-family: sans-serif;
@@ -77,8 +80,14 @@
                 position: relative;
                 border-radius: calc(var(--main-borderadius) - var(--main-pad));
                 overflow: hidden;
-                border: 1px solid;
-                border-color: rgb(from currentColor r g b / 20%);
+                /* border: 1px solid; */
+                /* border-color: rgb(from currentColor r g b / 20%); */
+                box-shadow:
+                    0px 0px 1px rgb(from currentColor r g b / 10%), 
+                    0px 0px 2px rgb(from currentColor r g b / 8%),
+                    0px 0px 4px rgb(from currentColor r g b / 6%), 
+                    0px 0px 6px rgb(from currentColor r g b / 4%), 
+                    0px 0px 8px rgb(from currentColor r g b / 2%);
 
                 & .image {
                     display: block;
@@ -112,8 +121,14 @@
                     display: block;
                     max-width: 100%;
                     border-radius: 6px;
-                    border: 1px solid;
-                    border-color: rgb(from currentColor r g b / 20%);
+                    /* border: 1px solid;
+                    border-color: rgb(from currentColor r g b / 20%); */
+                box-shadow:
+                    0px 0px 1px rgb(from currentColor r g b / 10%), 
+                    0px 0px 2px rgb(from currentColor r g b / 8%),
+                    0px 0px 4px rgb(from currentColor r g b / 6%), 
+                    0px 0px 6px rgb(from currentColor r g b / 4%), 
+                    0px 0px 8px rgb(from currentColor r g b / 2%);
                 }
             }
         }
@@ -130,14 +145,14 @@
             z-index: 10;
             border-color: none;
             border-radius: 50%;
-            background-color: rgba(255, 255, 255, 0.2);
-            background-color: color(display-p3 1 1 1 / 0.2);
+            background-color: rgba(255, 255, 255, 0.1);
+            background-color: color(display-p3 1 1 1 / 0.1);
             /* background: 
             radial-gradient(
             circle at 50% 15%, 
             rgba(255, 255, 255, 0.1), 
             rgba(255, 255, 255, 0.2)); */
-            backdrop-filter: blur(0.4rem);
+            backdrop-filter: blur(0.5rem);
             box-shadow: 
                 inset 0 3px 5px -3px color(display-p3 1 1 1),
                 inset 0 1px 8px -1px rgba(3, 7, 18 , 0.2), 
@@ -322,11 +337,11 @@
         function buildNotification(item, index) {
             const notification = document.createElement('div');
             notification.className = 'item';
-            const isOnThisDay = (item.sourceKey || '').toLowerCase() === 'on this day';
-            const isIthome = (item.sourceKey || '').toLowerCase() === 'ithome';
-            const isPotd = (item.sourceKey || '').toLowerCase() === 'picture of the day';
+            const isOnThisDay = item.sourceKey  === 'on this day';
+            const isIthome = item.sourceKey === 'ithome';
+            const isPotd = item.sourceKey === 'picture of the day';
 
-            if (item.imageUrl && !isOnThisDay) {
+            if (isPotd) {
                 const pictureWrap = document.createElement('div');
                 pictureWrap.className = 'media';
 
