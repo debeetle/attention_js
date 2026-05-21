@@ -42,16 +42,29 @@
             background-color: purple;
         }
 
-        html, body {
+        html,
+        body {
             -webkit-overflow-scrolling: touch;
             font-family: 'Universal';
         }
 
-        a { text-decoration: none; }
-        ul { padding-left: 1rem; }
+        a {
+            text-decoration: none;
+        }
 
-        .favicon { display: block; width: auto; height: 1.5rem; }
-        .visible { display: inline-block; }
+        ul {
+            padding-left: 1rem;
+        }
+
+        .favicon {
+            display: block;
+            width: auto;
+            height: 1.5rem;
+        }
+
+        .visible {
+            display: inline-block;
+        }
 
         .item {
             margin: 1rem 0;
@@ -61,8 +74,8 @@
             border-radius: var(--main-borderadius);
             max-width: 100%;
             box-shadow:
-                0px 0px 1px rgb(from currentColor r g b / 3%), 
-                0px 0px 2px rgb(from currentColor r g b / 2%), 
+                0px 0px 1px rgb(from currentColor r g b / 3%),
+                0px 0px 2px rgb(from currentColor r g b / 2%),
                 0px 0px 3px rgb(from currentColor r g b / 1%);
 
             & .meta {
@@ -83,10 +96,10 @@
                 /* border: 1px solid; */
                 /* border-color: rgb(from currentColor r g b / 20%); */
                 box-shadow:
-                    0px 0px 1px rgb(from currentColor r g b / 10%), 
+                    0px 0px 1px rgb(from currentColor r g b / 10%),
                     0px 0px 2px rgb(from currentColor r g b / 8%),
-                    0px 0px 4px rgb(from currentColor r g b / 6%), 
-                    0px 0px 6px rgb(from currentColor r g b / 4%), 
+                    0px 0px 4px rgb(from currentColor r g b / 6%),
+                    0px 0px 6px rgb(from currentColor r g b / 4%),
                     0px 0px 8px rgb(from currentColor r g b / 2%);
 
                 & .image {
@@ -123,12 +136,12 @@
                     border-radius: 6px;
                     /* border: 1px solid;
                     border-color: rgb(from currentColor r g b / 20%); */
-                box-shadow:
-                    0px 0px 1px rgb(from currentColor r g b / 10%), 
-                    0px 0px 2px rgb(from currentColor r g b / 8%),
-                    0px 0px 4px rgb(from currentColor r g b / 6%), 
-                    0px 0px 6px rgb(from currentColor r g b / 4%), 
-                    0px 0px 8px rgb(from currentColor r g b / 2%);
+                    box-shadow:
+                        0px 0px 1px rgb(from currentColor r g b / 10%),
+                        0px 0px 2px rgb(from currentColor r g b / 8%),
+                        0px 0px 4px rgb(from currentColor r g b / 6%),
+                        0px 0px 6px rgb(from currentColor r g b / 4%),
+                        0px 0px 8px rgb(from currentColor r g b / 2%);
                 }
             }
         }
@@ -153,16 +166,16 @@
             rgba(255, 255, 255, 0.1), 
             rgba(255, 255, 255, 0.2)); */
             backdrop-filter: blur(0.5rem);
-            box-shadow: 
+            box-shadow:
                 inset 0 3px 5px -3px color(display-p3 1 1 1),
-                inset 0 1px 8px -1px rgba(3, 7, 18 , 0.2), 
+                inset 0 1px 8px -1px rgba(3, 7, 18, 0.2),
                 /* inset 0 -5px 8px -5px rgba(255, 255, 255, 0.5),  */
                 /* inset 0 -5px 8px -5px color(display-p3 1 1 1 / 0.5), */
                 inset 0 -5px 8px -5px rgba(255, 255, 255, 0.4),
-                0px 0px 1px rgb(from currentColor r g b / 10%), 
+                0px 0px 1px rgb(from currentColor r g b / 10%),
                 0px 1px 2px rgb(from currentColor r g b / 8%),
-                0px 2px 4px rgb(from currentColor r g b / 6%), 
-                0px 3px 6px rgb(from currentColor r g b / 4%), 
+                0px 2px 4px rgb(from currentColor r g b / 6%),
+                0px 3px 6px rgb(from currentColor r g b / 4%),
                 0px 4px 8px rgb(from currentColor r g b / 2%);
             transition: width 0.4s cubic-bezier(0.25, 0.8, 0.25, 1.2), height 0.4s cubic-bezier(0.25, 0.8, 0.25, 1.2), border-radius 0.2s ease, background-color 0.2s ease;
 
@@ -176,12 +189,11 @@
                 background: none;
                 border: 1.5px solid currentColor;
                 border-radius: 50%;
-                corner-shape: squircle;
                 opacity: 0.3;
                 transition: opacity 0.1s ease;
                 pointer-events: none;
             }
-            
+
             & li {
                 visibility: hidden;
                 display: flex;
@@ -202,20 +214,33 @@
                 padding: 8px;
                 background-color: rgba(255, 255, 255, 0.1);
                 backdrop-filter: blur(1.5rem);
-                box-shadow: 
-                inset 0 0px 5px color(display-p3 1 1 1),
-                inset 0 0px 6px rgba(3, 7, 18, 0.2), 
-                /* inset 0 -5px 8px rgba(255, 255, 255, 0.2),  */
-                /* inset 0 -5px 8px color(display-p3 1 1 1 / 0.2), */
-                0px 0px 1px rgb(from currentColor r g b / 10%), 
-                0px 0px 2px rgb(from currentColor r g b / 8%),
-                0px 0px 4px rgb(from currentColor r g b / 6%),
-                0px 0px 6px rgb(from currentColor r g b / 4%), 
-                0px 0px 8px rgb(from currentColor r g b / 2%);
-                &::after { opacity: 0; }
-                & li { visibility: visible; }
-                & li img { width: 1.5rem; height: 1.5rem; }
-                & li.selected { background-color: rgba(0, 0, 0, 0.2); }
+                box-shadow:
+                    inset 0 0px 5px color(display-p3 1 1 1),
+                    inset 0 0px 6px rgba(3, 7, 18, 0.2),
+                    /* inset 0 -5px 8px rgba(255, 255, 255, 0.2),  */
+                    /* inset 0 -5px 8px color(display-p3 1 1 1 / 0.2), */
+                    0px 0px 1px rgb(from currentColor r g b / 10%),
+                    0px 0px 2px rgb(from currentColor r g b / 8%),
+                    0px 0px 4px rgb(from currentColor r g b / 6%),
+                    0px 0px 6px rgb(from currentColor r g b / 4%),
+                    0px 0px 8px rgb(from currentColor r g b / 2%);
+
+                &::after {
+                    opacity: 0;
+                }
+
+                & li {
+                    visibility: visible;
+                }
+
+                & li img {
+                    width: 1.5rem;
+                    height: 1.5rem;
+                }
+
+                & li.selected {
+                    background-color: rgba(0, 0, 0, 0.2);
+                }
             }
         }
     </style>
@@ -337,7 +362,7 @@
         function buildNotification(item, index) {
             const notification = document.createElement('div');
             notification.className = 'item';
-            const isOnThisDay = item.sourceKey  === 'on this day';
+            const isOnThisDay = item.sourceKey === 'on this day';
             const isIthome = item.sourceKey === 'ithome';
             const isPotd = item.sourceKey === 'picture of the day';
 
@@ -357,8 +382,8 @@
                 const overlay = document.createElement('div');
                 overlay.className = 'caption';
 
-                if (isPotd && (item.description || item.summaryHtml)) {
-                    const first = (item.description || '').trim();
+                if (isPotd && item.notificationBody) {
+                    const first = item.notificationBody.trim();
                     if (first) {
                         const title = document.createElement('div');
                         title.textContent = first;
@@ -414,17 +439,17 @@
             parent.appendChild(row);
         }
 
-        function appendBody(parent, item) {
+         function appendBody(parent, item) {
             if ((item.sourceKey || '').toLowerCase() === 'on this day') {
                 appendOnThisDayBody(parent, item);
                 return;
             }
             if ((item.sourceKey || '').toLowerCase() === 'ithome') return;
-            if (!item.summaryHtml) return;
+            if (!item.content) return;
 
             const articleText = document.createElement('div');
-            if (item.summaryHtml) {
-                articleText.innerHTML = item.summaryHtml;
+            if (item.content) {
+                articleText.innerHTML = item.content;
             }
 
             parent.appendChild(articleText);
@@ -438,7 +463,7 @@
             const annotated = document.createElement('div');
             annotated.className = 'annotated';
             const annotatedText = document.createElement('div');
-            annotatedText.innerHTML = item.summaryHtml;
+            annotatedText.innerHTML = item.content;
             const annotatedPic = document.createElement('img');
             annotatedPic.className = 'image';
             annotatedPic.src = item.imageUrl;
@@ -501,19 +526,19 @@
         }
 
         async function subscribe() {
-                const permission = await Notification.requestPermission();
-                if (permission !== 'granted') return;
+            const permission = await Notification.requestPermission();
+            if (permission !== 'granted') return;
 
-                const subscription = await window.pushManager.subscribe({
-                    userVisibleOnly: true,
-                    applicationServerKey: urlBase64ToUint8Array(PUBLIC_VAPID_KEY)
-                });
+            const subscription = await window.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: urlBase64ToUint8Array(PUBLIC_VAPID_KEY)
+            });
 
-                await fetch('/subscribe', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(subscription)
-                });
+            await fetch('/subscribe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(subscription)
+            });
 
 
         }
