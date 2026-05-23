@@ -382,8 +382,8 @@
                 const overlay = document.createElement('div');
                 overlay.className = 'caption';
 
-                if (isPotd && item.notificationBody) {
-                    const first = item.notificationBody.trim();
+                if (isPotd && item.notiBody) {
+                    const first = item.notiBody.trim();
                     if (first) {
                         const title = document.createElement('div');
                         title.textContent = first;
@@ -439,7 +439,7 @@
             parent.appendChild(row);
         }
 
-         function appendBody(parent, item) {
+        function appendBody(parent, item) {
             if ((item.sourceKey || '').toLowerCase() === 'on this day') {
                 appendOnThisDayBody(parent, item);
                 return;
@@ -526,7 +526,9 @@
         }
 
         async function subscribe() {
-            const permission = await Notification.requestPermission();
+            const permission = Notification.permission === 'granted'
+                ? 'granted'
+                : await Notification.requestPermission();
             if (permission !== 'granted') return;
 
             const subscription = await window.pushManager.subscribe({
@@ -603,8 +605,19 @@
                 activePointerId = null;
             }
 
+            function checkOpenUrlParam() {
+                const urlParams = new URLSearchParams(window.location.search);
+                const openUrl = urlParams.get('open');
+                if (openUrl) {
+                    const newUrl = window.location.pathname + window.location.hash;
+                    window.history.replaceState({}, document.title, newUrl);
+                    window.location.href = openUrl;
+                }
+            }
+
             renderLocalHistory();
             syncHistory();
+            checkOpenUrlParam();
 
             try {
                 const res = await fetch('/config', { cache: 'no-store' });
@@ -614,11 +627,14 @@
                 return;
             }
 
-            if (Notification.permission === 'default') {
+            if (Notification.permission === 'granted') {
+                subscribe();
+            } else if (Notification.permission === 'default') {
                 const registerBtn = document.createElement('div');
                 registerBtn.className = "permission-grant";
+                registerBtn.textContent = "Enable Push Notifications";
                 registerBtn.addEventListener('click', subscribe, { once: true });
-                registerBtn.style.display = "none";
+                document.body.insertBefore(registerBtn, document.body.firstChild);
             }
         });
     </script>

@@ -115,58 +115,7 @@ function sanitizeHref(href, baseUrl) {
     return '';
 }
 
-class SanitizerHandler {
-    constructor(baseUrl, maxLis = 0) {
-        this.baseUrl = baseUrl;
-        this.maxLis = maxLis;
-        this.dropDepth = 0;
-        this.textParts = [];
-        this.imageUrl = '';
-        this.done = false;
-    }
 
-    element(el) {
-        if (this.done) return el.remove();
-        const tag = el.tagName.toLowerCase();
-
-        if ((tag === 'img' || tag === 'media:content' || tag === 'media:thumbnail') && !this.imageUrl) {
-            const src = el.getAttribute('src') || el.getAttribute('url');
-            if (src) this.imageUrl = toAbsoluteUrl(src, this.baseUrl);
-        }
-
-        if (DROP_TAGS.has(tag) || (tag === 'span' && el.getAttribute('typeof') === 'mw:File')) {
-            el.remove();
-            if (tag !== 'img' && tag !== 'link') {
-                this.dropDepth++;
-                el.onEndTag(() => this.dropDepth--);
-            }
-            return;
-        }
-
-        if (tag === 'li') {
-            if (this.maxLis <= 0) {
-                this.done = true;
-                return el.remove();
-            }
-            this.maxLis--;
-        }
-
-        if (UNWRAP_TAGS.has(tag)) return el.removeAndKeepContent();
-
-        DROP_ATTRIBUTES.forEach(name => el.removeAttribute(name));
-
-        if (tag === 'a') {
-            const href = sanitizeHref(el.getAttribute('href'), this.baseUrl);
-            if (href) el.setAttribute('href', href);
-        }
-    }
-
-    text(txt) {
-        if (this.done) return txt.remove();
-        if (this.dropDepth > 0) return;
-        this.textParts.push(txt.text);
-    }
-}
 
 // ---------------------------------------------------------------------------
 // XML Parsing helpers
@@ -212,9 +161,8 @@ class FeedItemParser {
         this.base = base;
         this.sourceKey = sourceKey;
         this.rawContent = base.rawContent;
-        this.sentences = 3;
-        this.maxLis = 0;
-        this.notificationPrefix = '';
+        this.sentences = 5;
+        this.notiTitlePre = '';
         this.title = FeedItemParser.cleanText(base.title);
         this.cleanedContent = FeedItemParser.cleanText(this.rawContent);
     }
@@ -226,34 +174,95 @@ class FeedItemParser {
             .replace(/\s+/g, ' ').trim();
     }
 
-    async parseHtml(handler) {
+    // HTMLRewriter callback entries
+    element(el) {
+        this.handleElement(el);
+    }
+
+    text(txt) {
+        this.handleText(txt);
+    }
+
+    // Default implementations for sanitization/extraction
+    handleElement(el) {
+        const tag = el.tagName.toLowerCase();
+        const baseUrl = this.base.link;
+
+        if ((tag === 'img' || tag === 'media:content' || tag === 'media:thumbnail') && !this.imageUrl) {
+            const src = el.getAttribute('src') || el.getAttribute('url');
+            if (src) this.imageUrl = toAbsoluteUrl(src, baseUrl);
+        }
+
+        if (DROP_TAGS.has(tag) || (tag === 'span' && el.getAttribute('typeof') === 'mw:File')) {
+            el.remove();
+            if (tag !== 'img' && tag !== 'link') {
+                this.dropDepth++;
+                el.onEndTag(() => this.dropDepth--);
+            }
+            return;
+        }
+
+        if (UNWRAP_TAGS.has(tag)) return el.removeAndKeepContent();
+
+        DROP_ATTRIBUTES.forEach(name => el.removeAttribute(name));
+
+        if (tag === 'a') {
+            const href = sanitizeHref(el.getAttribute('href'), baseUrl);
+            if (href) el.setAttribute('href', href);
+        }
+    }
+
+    handleText(txt) {
+        if (this.dropDepth > 0) return;
+        this.textParts.push(txt.text);
+    }
+
+    async parseHtml(html) {
         try {
             return (await new HTMLRewriter()
-                .on('*', handler)
-                .transform(new Response(this.cleanedContent, { headers: { 'Content-Type': 'text/html; charset=utf-8' } }))
+                .on('*', {
+                    element: el => this.element(el),
+                    text: txt => this.text(txt)
+                })
+                .transform(new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } }))
                 .text() || '').trim();
         } catch {
             return '';
         }
     }
 
+    // Orchestrator: Runs the parser pipeline
     async parse() {
-        const handler = new SanitizerHandler(this.base.link, this.maxLis);
-        const content = await this.parseHtml(handler);
-        const title = this.title;
-        let text = FeedItemParser.cleanText(handler.textParts.join(''));
+        const { content, text, imageUrl, title } = await this.extract(this.cleanedContent);
+        const item = this.format(content, text, imageUrl, title ?? this.title);
+        return this.postprocessItem(item);
+    }
 
-        if (this.sentences > 0 && text) {
+    // Hook 1: Run parser / sanitizer
+    async extract(html) {
+        this.dropDepth = 0;
+        this.textParts = [];
+        this.imageUrl = '';
+
+        const content = await this.parseHtml(html);
+        const text = FeedItemParser.cleanText(this.textParts.join(''));
+        return { content, text, imageUrl: this.imageUrl, title: null };
+    }
+
+    // Hook 2: Assemble notification and body payload
+    format(content, text, imageUrl, title) {
+        let body = text;
+        if (this.sentences > 0 && body) {
             const segmenter = new Intl.Segmenter(undefined, { granularity: 'sentence' });
             let count = 0;
             let truncated = '';
-            for (const { segment } of segmenter.segment(text)) {
+            for (const { segment } of segmenter.segment(body)) {
                 truncated += segment;
                 if (segment.trim() && ++count >= this.sentences) break;
             }
-            text = truncated.trim();
+            body = truncated.trim();
         }
-        if (!text) text = title;
+        if (!body) body = title;
 
         return {
             sourceKey: this.sourceKey,
@@ -261,29 +270,31 @@ class FeedItemParser {
             link: this.base.link,
             rawContent: this.rawContent,
             content,
-            notificationTitle: this.notificationPrefix ? `${this.notificationPrefix} ${title}` : title,
-            notificationBody: text,
-            imageUrl: handler.imageUrl,
+            notiTitle: this.notiTitlePre ? `${this.notiTitlePre} ${title}` : title,
+            notiBody: body,
+            imageUrl,
             itemId: this.base.itemId,
             publishedAt: this.base.publishedAt
         };
     }
+
+    // Hook 3: Final modification hook (e.g. set prefixes)
+    postprocessItem(item) {
+        return item;
+    }
 }
 
 class IthomeFeedItemParser extends FeedItemParser {
-    async parse() {
-        const title = this.title;
+    async extract(html) {
+        return { content: '', text: '', imageUrl: '', title: this.title };
+    }
+
+    postprocessItem(item) {
         return {
-            sourceKey: this.sourceKey,
-            title,
-            link: this.base.link,
-            rawContent: title,
-            content: '',
-            notificationTitle: '[IThome]',
-            notificationBody: title,
-            imageUrl: '',
-            itemId: this.base.itemId,
-            publishedAt: this.base.publishedAt
+            ...item,
+            rawContent: this.title,
+            notiTitle: '[IThome]',
+            notiBody: this.title
         };
     }
 }
@@ -293,100 +304,93 @@ class PotdFeedItemParser extends FeedItemParser {
         super(base, sourceKey);
         this.sentences = 1;
     }
-    async parse() {
-        const item = await super.parse();
+
+    postprocessItem(item) {
         return {
             ...item,
-            notificationTitle: '[Potd]',
+            notiTitle: '[Potd]',
             content: ''
         };
     }
 }
 
 class OnThisDayFeedItemParser extends FeedItemParser {
-    async parse() {
+    constructor(base, sourceKey) {
+        super(base, sourceKey);
+        this.sentences = 0;
+    }
+
+    handleElement(el) {
+        const tag = el.tagName.toLowerCase();
         const baseUrl = this.base.link;
 
-        let titleText = '';
-        let imageUrl = '';
-        let content = '';
-
-        let firstPDone = false;
-        let currentLiHtml = '';
-        let insideLi = false;
-
-        await new HTMLRewriter()
-            .on('p', {
-                element(el) {
-                    if (!firstPDone) {
-                        el.onEndTag(() => {
-                            titleText = titleText.replace(/\s+/g, ' ').trim();
-                            firstPDone = true;
-                        });
-                    }
-                },
-                text(txt) {
-                    if (!firstPDone) {
-                        titleText += txt.text;
-                    }
+        if (tag === 'p') {
+            if (!this.firstPDone) {
+                this.insideP = true;
+                el.onEndTag(() => {
+                    this.insideP = false;
+                    this.pTitle = this.pTitle.replace(/\s+/g, ' ').trim();
+                    this.firstPDone = true;
+                });
+            }
+        } else if (tag === 'img') {
+            const src = el.getAttribute('src') || el.getAttribute('url');
+            if (src && !this.imageUrl) {
+                this.imageUrl = toAbsoluteUrl(src, baseUrl);
+            }
+        } else if (tag === 'li') {
+            this.currentLiHtml = '';
+            this.insideLi = true;
+            el.onEndTag(() => {
+                this.insideLi = false;
+                const text = this.currentLiHtml.replace(/\s+/g, ' ').trim();
+                if (/pictured|depicted/i.test(text) || !this.selectedLiText) {
+                    this.selectedLiText = text;
                 }
-            })
-            .on('img', {
-                element(el) {
-                    const src = el.getAttribute('src') || el.getAttribute('url');
-                    if (src && !imageUrl) {
-                        imageUrl = toAbsoluteUrl(src, baseUrl);
-                    }
-                }
-            })
-            .on('li', {
-                element(el) {
-                    currentLiHtml = '';
-                    insideLi = true;
-                    el.onEndTag(() => {
-                        insideLi = false;
-                        const text = currentLiHtml.replace(/\s+/g, ' ').trim();
-                        if (/pictured|depicted/i.test(text) || !content) {
-                            content = text;
-                        }
-                    });
-                },
-                text(txt) {
-                    currentLiHtml += txt.text;
-                }
-            })
-            .on('a', {
-                element(el) {
-                    const href = el.getAttribute('href');
-                    const absHref = href ? toAbsoluteUrl(href, baseUrl) : '';
-                    if (href) {
-                        el.setAttribute('href', absHref);
-                    }
-                    if (insideLi) {
-                        currentLiHtml += `<a href="${absHref}">`;
-                        el.onEndTag(() => {
-                            currentLiHtml += '</a>';
-                        });
-                    }
-                }
-            })
-            .transform(new Response(this.cleanedContent, { headers: { 'Content-Type': 'text/html; charset=utf-8' } }))
-            .text();
+            });
+        } else if (tag === 'a') {
+            const href = el.getAttribute('href');
+            const absHref = href ? toAbsoluteUrl(href, baseUrl) : '';
+            if (href) {
+                el.setAttribute('href', absHref);
+            }
+            if (this.insideLi) {
+                this.currentLiHtml += `<a href="${absHref}">`;
+                el.onEndTag(() => {
+                    this.currentLiHtml += '</a>';
+                });
+            }
+        }
+    }
 
-        const notificationBody = FeedItemParser.cleanText(content.replace(/<[^>]+>/g, ''));
-        const cleanedTitle = FeedItemParser.cleanText(titleText);
+    handleText(txt) {
+        if (this.insideLi) {
+            this.currentLiHtml += txt.text;
+        } else if (this.insideP && !this.firstPDone) {
+            this.pTitle += txt.text;
+        }
+    }
 
+    async extract(html) {
+        this.pTitle = '';
+        this.firstPDone = false;
+        this.currentLiHtml = '';
+        this.insideLi = false;
+        this.insideP = false;
+        this.selectedLiText = '';
+        this.imageUrl = '';
+
+        await this.parseHtml(html);
+
+        const cleanedTitle = FeedItemParser.cleanText(this.pTitle) || this.title;
+        const text = FeedItemParser.cleanText(this.selectedLiText.replace(/<[^>]+>/g, ''));
+        return { content: this.selectedLiText, text, imageUrl: this.imageUrl, title: cleanedTitle };
+    }
+
+    postprocessItem(item) {
         return {
-            sourceKey: this.sourceKey,
-            title: cleanedTitle,
-            link: baseUrl,
-            rawContent: this.rawContent,
-            content,
-            notificationTitle: `[Otd] ${cleanedTitle}`,
-            notificationBody,
-            imageUrl,
-            itemId: this.base.itemId,
-            publishedAt: this.base.publishedAt
+            ...item,
+            notiTitle: `[Otd] ${item.title}`
         };
     }
 }
@@ -395,15 +399,35 @@ class DoYouKnowFeedItemParser extends FeedItemParser {
     constructor(base, sourceKey) {
         super(base, sourceKey);
         this.sentences = 0;
-        this.maxLis = 3;
-        this.notificationPrefix = '[Dyk]';
+        this.notiTitlePre = '[Dyk]';
+    }
+
+    handleElement(el) {
+        const tag = el.tagName.toLowerCase();
+        if (tag === 'li') {
+            if (this.liCount >= 3) {
+                el.remove();
+                this.dropDepth++;
+                el.onEndTag(() => this.dropDepth--);
+                return;
+            }
+            el.onEndTag(() => {
+                this.liCount++;
+            });
+        }
+        super.handleElement(el);
+    }
+
+    async extract(html) {
+        this.liCount = 0;
+        return super.extract(html);
     }
 }
 
 class SspaiFeedItemParser extends FeedItemParser {
     constructor(base, sourceKey) {
         super(base, sourceKey);
-        this.notificationPrefix = '[Pai]';
+        this.notiTitlePre = '[Pai]';
     }
 }
 
@@ -428,22 +452,26 @@ async function parseFeedItems(feedText, source = null) {
     if (!root) return [];
 
     const baseUrl = resolveFeedLink(root.link || root.atomLink);
-    const items = (await Promise.all(asArray(root.entry || root.item || []).map(n => parseFeedItem(n, baseUrl, source))))
-        .filter(it => it && (it.title || (it.sourceKey || '').toLowerCase() === 'ithome'));
+    const items = (await Promise.all(asArray(root.entry || root.item || []).map(n => parseFeedItem(n, baseUrl, source))));
+        // .filter(it => it && (it.title || (it.sourceKey || '').toLowerCase() === 'ithome'));
 
     return items.sort((a, b) => Date.parse(a.publishedAt || 0) - Date.parse(b.publishedAt || 0));
 }
 
-const buildNotificationPayload = item => ({
-    web_push: 8030,
-    notification: {
-        title: item.notificationTitle || item.title || '',
-        body: item.notificationBody || '',
-        silent: false,
-        app_badge: '1',
-        ...(item.link ? { navigate: item.link } : {})
-    }
-});
+const buildNotificationPayload = (item, env) => {
+    const baseUrl = env?.BASE_URL || 'https://attention.debeetle.cn.eu.org';
+    const navigate = item.link ? `${baseUrl}/?open=${encodeURIComponent(item.link)}` : baseUrl;
+    return {
+        web_push: 8030,
+        notification: {
+            title: item.notiTitle,
+            body: item.notiBody || '',
+            silent: false,
+            app_badge: '1',
+            navigate
+        }
+    };
+};
 
 const Store = {
     deriveKey: item => item.itemId || item.link || `${item.title}::${item.publishedAt || ''}`,
@@ -469,14 +497,14 @@ async function processSourceItem(env, source, item, opts = {}) {
 
     const cfg = DEFAULT_RSS_SOURCES.find(f => f.sourceKey === source.sourceKey);
     let cachedFilterText = null;
-    const getFilterText = () => cachedFilterText ??= [item.title, item.notificationBody].filter(Boolean).join(' ').toLowerCase();
+    const getFilterText = () => cachedFilterText ??= [item.title, item.notiBody].filter(Boolean).join(' ').toLowerCase();
 
     if (cfg?.excludeKeywords?.length && cfg.excludeKeywords.some(kw => getFilterText().includes(kw.toLowerCase()))) {
         if (updateLastSeen) await Store.setPointer(env, source.sourceKey, key);
         return { skipped: true, reason: 'excluded', sourceKey: source.sourceKey, itemKey: key };
     }
 
-    const notificationBody = item.notificationBody || item.title || '';
+    const notiBody = item.notiBody || item.title || '';
     const historyItem = {
         id: `${source.sourceKey}:${key}`,
         sourceKey: source.sourceKey,
@@ -485,9 +513,9 @@ async function processSourceItem(env, source, item, opts = {}) {
         link: item.link || '',
         imageUrl: item.imageUrl || '',
         publishedAt: item.publishedAt || '',
-        description: notificationBody,
-        notificationTitle: item.notificationTitle || '',
-        notificationBody,
+        description: notiBody,
+        notiTitle: item.notiTitle || '',
+        notiBody: notiBody,
         createdAt: new Date().toISOString()
     };
 
@@ -500,7 +528,7 @@ async function processSourceItem(env, source, item, opts = {}) {
         return { skipped: true, reason: 'filtered', sourceKey: source.sourceKey, itemKey: key };
     }
 
-    const result = await sendToAllSubscriptions(env, buildNotificationPayload(historyItem));
+    const result = await sendToAllSubscriptions(env, buildNotificationPayload(historyItem, env));
     if (updateLastSeen) await Store.setPointer(env, source.sourceKey, key);
     return { skipped: false, sourceKey: source.sourceKey, itemKey: key, ...result };
 }
@@ -508,11 +536,11 @@ async function processSourceItem(env, source, item, opts = {}) {
 async function processFeedItems(env, source, items, opts = {}) {
     const lastKey = opts.lastItemKey || await Store.getPointer(env, source.sourceKey) || '';
     const unseen = getUnseenItems(items, lastKey);
-    const results = { sourceKey: source.sourceKey, total: unseen.length, processed: 0, skipped: 0, sent: 0, failed: 0, errors: [] };
+    const results = { sourceKey: source.sourceKey, total: unseen.length, processed: 0, sent: 0, failed: 0, errors: [] };
 
     for (const item of unseen) {
         const r = await processSourceItem(env, source, item, opts);
-        if (r.skipped) { results.skipped++; continue; }
+        if (r.skipped) { continue; }
         results.processed++;
         results.sent += r.sent || 0;
         results.failed += r.failed || 0;
@@ -524,7 +552,7 @@ async function processFeedItems(env, source, items, opts = {}) {
 
 async function processFetchedFeedText(env, source, feedText, opts = {}) {
     const items = await parseFeedItems(feedText, source);
-    if (!items.length) return { skipped: true, reason: 'no_items', sourceKey: source.sourceKey };
+    if (!items.length) return { reason: 'no_items', sourceKey: source.sourceKey };
     return processFeedItems(env, source, items, opts);
 }
 
@@ -562,7 +590,7 @@ function buildRainAlertItem(forecast) {
     const summary = `Weather expected by ${time}. ${details}`;
 
     return {
-        title: 'Weather', description: summary, content: `<p>${summary}</p>`, notificationBody: summary,
+        title: 'Weather', description: summary, content: `<p>${summary}</p>`, notiBody: summary,
         link: '', imageUrl: '', itemId: rainy.fxTime, publishedAt: rainy.fxTime
     };
 }
@@ -601,6 +629,7 @@ async function listSubscriptions(env) {
 async function sendToAllSubscriptions(env, payload) {
     const subs = await listSubscriptions(env);
     const results = { total: subs.length, sent: 0, failed: 0, errors: [] };
+    console.log(`[Push] subs=${subs.length}, payload=${JSON.stringify(payload).slice(0, 300)}`);
     for (const sub of subs) {
         try { await sendNotification(sub, JSON.stringify(payload)); results.sent++; }
         catch (e) { results.failed++; results.errors.push({ endpoint: sub.endpoint, error: e?.message || String(e) }); }
@@ -658,6 +687,8 @@ export default {
 
         initializeVapid(env);
 
+
+
         if (request.method === 'GET' && url.pathname === '/config') {
             return json({ vapidPublicKey: env.VAPID_PUBLIC_KEY || '' });
         }
@@ -666,6 +697,13 @@ export default {
             const now = Date.now();
             const items = (await Store.getHistory(env)).filter(it => (now - Date.parse(it.createdAt)) <= HISTORY_RETENTION_MS);
             return json({ ok: true, items });
+        }
+
+        if (request.method === 'POST' && url.pathname === '/test-push') {
+            if ((request.headers.get('x-api-key') || '') !== env.SEND_API_KEY) return new Response('Unauthorized', { status: 401 });
+            const payload = buildNotificationPayload({ title: 'Test notification', notiBody: new Date().toISOString() }, env);
+            const result = await sendToAllSubscriptions(env, payload);
+            return json({ ok: true, ...result });
         }
 
         if (request.method === 'POST' && url.pathname === '/subscribe') {
@@ -686,19 +724,6 @@ export default {
             return json({ status: 'deleted' });
         }
 
-        if (request.method === 'POST' && url.pathname === '/send') {
-            if ((request.headers.get('x-api-key') || '') !== env.SEND_API_KEY) return new Response('Unauthorized', { status: 401 });
-            const body = await request.json();
-            if (!body?.endpoint) return new Response('Bad Request', { status: 400 });
-
-            const stored = await env.SUBS.get(await sha256hex(body.endpoint));
-            if (!stored) return new Response('Not found', { status: 404 });
-
-            const { iv, ct } = JSON.parse(stored);
-            const { sub } = JSON.parse(await aesGcmDecrypt(env.SUBS_ENC_KEY, iv, ct));
-            try { await sendNotification(sub, JSON.stringify(body.payload || {})); return json({ ok: true }); }
-            catch (e) { return new Response(e?.message || String(e), { status: 500 }); }
-        }
 
         if (url.pathname === '/websub') {
             if (request.method === 'GET') {
@@ -770,7 +795,7 @@ export default {
             ctx?.waitUntil?.(processSourceItem(env, { sourceKey: body.sourceKey || 'webhook:default' }, {
                 title: body.title, description: body.body || '',
                 content: body.bodyHtml || '', link: body.link || '', imageUrl: body.imageUrl || '',
-                notificationBody: body.body || '',
+                notiBody: body.body || '',
                 itemId: body.itemKey || body.id || body.link || '', publishedAt: body.publishedAt || new Date().toISOString()
             }, { updateLastSeen: true }));
             return new Response(null, { status: 204 });
@@ -786,15 +811,20 @@ export default {
         if (request.method === 'POST' && url.pathname === '/rss/send') {
             if ((request.headers.get('x-api-key') || '') !== env.SEND_API_KEY) return new Response('Unauthorized', { status: 401 });
             const body = await request.json().catch(() => ({}));
-            const feedUrl = body.url || env.POLL_URL || '';
-            if (!feedUrl) return new Response('Missing feed URL', { status: 400 });
+            let feedUrl = body.url || '';
+            if (body.sourceKey) {
+                const cfg = DEFAULT_RSS_SOURCES.find(f => f.sourceKey.toLowerCase() === body.sourceKey.toLowerCase());
+                if (cfg) feedUrl = cfg.feedUrl;
+            }
+            if (!feedUrl) feedUrl = env.POLL_URL || '';
+            if (!feedUrl) return new Response('Missing feed URL or sourceKey', { status: 400 });
 
             const preview = await fetchFeedPreview(feedUrl);
-            if (preview.status < 200 || preview.status >= 300) return json({ ok: false, feedUrl, status: preview.status, error: 'Feed fetch failed' }, 502);
+            if (preview.status < 200 || preview.status >= 300) return json({ ok: false, status: preview.status, error: 'Feed fetch failed' }, 502);
 
             const cfg = DEFAULT_RSS_SOURCES.find(f => f.feedUrl === feedUrl);
             const result = await processFetchedFeedText(env, { sourceKey: cfg?.sourceKey || feedUrl }, preview.text, { updateLastSeen: true });
-            return json({ ok: !result.skipped && result.failed === 0, feedUrl, ...result }, result.failed === 0 ? 200 : 207);
+            return json({ ok: result.failed === 0, ...result }, result.failed === 0 ? 200 : 207);
         }
 
         return env.ASSETS.fetch(request);

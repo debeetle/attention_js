@@ -223,9 +223,10 @@ async function sendNotification(subscription, payload) {
   }
 
   const res = await fetch(endpoint, fetchOptions);
+  const resBody = await res.text().catch(() => '');
+  console.log(`[Push] ${new URL(endpoint).hostname} → ${res.status} ${res.statusText} | body=${resBody.slice(0, 200)}`);
   if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    const err = new Error(`Push send failed: ${res.status} ${res.statusText} ${text}`);
+    const err = new Error(`Push send failed: ${res.status} ${res.statusText} ${resBody}`);
     err.status = res.status;
     throw err;
   }
