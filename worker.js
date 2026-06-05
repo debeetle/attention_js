@@ -1,6 +1,12 @@
+globalThis.Buffer = globalThis.Buffer || class Buffer {
+    static isBuffer() { return false; }
+    static from(v) { return v; }
+};
+
 import { setVapidDetails, sendNotification } from './pwanotify.js';
 import { buildQWeatherAuthorizationHeader } from './qweather-jwt.js';
-import { XMLParser } from 'fast-xml-parser';
+import XMLParser from '@nodable/flexible-xml-parser';
+import { CompactBuilderFactory } from '@nodable/compact-builder';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -26,21 +32,27 @@ const DEFAULT_RSS_SOURCES = [
     },
     {
         sourceKey: 'sspai', feedUrl: 'https://sspai.com/feed',
-        includeKeywords: [], excludeKeywords: [],
+        push: [], ignore: [],
         crons: ['0 0,4,8,12 * * *']
     },
     {
         sourceKey: 'ithome', feedUrl: 'https://www.ithome.com/rss/',
-        includeKeywords: ["苹果", "微软", "谷歌"], excludeKeywords: ['追觅', '鸿蒙智', '鼠标', '电影票房', '荣耀', '券', '智界', '问界', '尊界', '抖音', '车型', '补贴', '联名', '月卡', '年卡', '红包'],
+        push: ["苹果", "微软", "谷歌"], ignore: ['追觅', '小鹏', '奥迪', '快手', '抖音', '微博', '比亚迪', '零跑', '吉利', '领克', '鸿蒙智', '鼠标', '电影票房', '荣耀', '券', '智界', '问界', '尊界', '抖音', '车型', '补贴', '联名', '月卡', '年卡', '红包'],
         crons: ['0 0,4,8,12 * * *']
     }
 ];
 
 const FEED_XML_PARSER = new XMLParser({
-    ignoreAttributes: false, attributeNamePrefix: '',
-    trimValues: false, parseTagValue: false, parseAttributeValue: false,
-    processEntities: false, cdataPropName: '__cdata',
-    stopNodes: ['*.summary', '*.description', '*.content']
+    skip: { attributes: false },
+    attributes: { prefix: '' },
+    nameFor: { cdata: '__cdata' },
+    tags: {
+        stopNodes: ['..summary', '..description', '..content']
+    },
+    OutputBuilder: new CompactBuilderFactory({
+        tags:       { valueParsers: [] },
+        attributes: { valueParsers: [] },
+    }),
 });
 
 const UNWRAP_TAGS = new Set(['b', 'strong', 'em']);
@@ -93,14 +105,28 @@ const safeEqual = (a, b) => {
     return out === 0;
 };
 
-const isOriginAllowed = (req, allowed) => !allowed?.length || allowed.some(item => (req.headers.get('Origin') || req.headers.get('Referer') || '').startsWith(item));
+const isOriginAllowed = (req, allowed) => {
+    if (!allowed?.length) return true;
+    const raw = req.headers.get('Origin') || req.headers.get('Referer') || '';
+    try {
+        const u = new URL(raw);
+        return allowed.some(item => {
+            if (raw === item || u.origin === item) return true;
+            try { return new URL(item).hostname === u.hostname; }
+            catch { return false; }
+        });
+    } catch { return false; }
+};
 
 // ---------------------------------------------------------------------------
 // VAPID
 // ---------------------------------------------------------------------------
+let vapidInitialized = false;
 function initializeVapid(env) {
+    if (vapidInitialized) return;
     if (env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY) {
         setVapidDetails(env.VAPID_SUBJECT || 'mailto:nobody@example.com', env.VAPID_PUBLIC_KEY, env.VAPID_PRIVATE_KEY);
+        vapidInitialized = true;
     }
 }
 
@@ -114,8 +140,6 @@ function sanitizeHref(href, baseUrl) {
     } catch { }
     return '';
 }
-
-
 
 // ---------------------------------------------------------------------------
 // XML Parsing helpers
@@ -285,16 +309,12 @@ class FeedItemParser {
 }
 
 class IthomeFeedItemParser extends FeedItemParser {
-    async extract(html) {
-        return { content: '', text: '', imageUrl: '', title: this.title };
-    }
-
-    postprocessItem(item) {
+    async parse() {
         return {
-            ...item,
-            rawContent: this.title,
-            notiTitle: '[IThome]',
-            notiBody: this.title
+            sourceKey: this.sourceKey, title: this.title,
+            link: this.base.link, rawContent: this.title, content: '',
+            notiTitle: '[IThome]', notiBody: this.title, imageUrl: '',
+            itemId: this.base.itemId, publishedAt: this.base.publishedAt
         };
     }
 }
@@ -453,14 +473,10 @@ async function parseFeedItems(feedText, source = null) {
 
     const baseUrl = resolveFeedLink(root.link || root.atomLink);
     const items = (await Promise.all(asArray(root.entry || root.item || []).map(n => parseFeedItem(n, baseUrl, source))));
-        // .filter(it => it && (it.title || (it.sourceKey || '').toLowerCase() === 'ithome'));
-
     return items.sort((a, b) => Date.parse(a.publishedAt || 0) - Date.parse(b.publishedAt || 0));
 }
 
-const buildNotificationPayload = (item, env) => {
-    const baseUrl = env?.BASE_URL || 'https://attention.debeetle.cn.eu.org';
-    const navigate = item.link ? `${baseUrl}/?open=${encodeURIComponent(item.link)}` : baseUrl;
+const buildNotificationPayload = (item) => {
     return {
         web_push: 8030,
         notification: {
@@ -468,7 +484,7 @@ const buildNotificationPayload = (item, env) => {
             body: item.notiBody || '',
             silent: false,
             app_badge: '1',
-            navigate
+            ...(item.link ? { navigate: item.link } : {})
         }
     };
 };
@@ -499,11 +515,19 @@ async function processSourceItem(env, source, item, opts = {}) {
     let cachedFilterText = null;
     const getFilterText = () => cachedFilterText ??= [item.title, item.notiBody].filter(Boolean).join(' ').toLowerCase();
 
-    if (cfg?.excludeKeywords?.length && cfg.excludeKeywords.some(kw => getFilterText().includes(kw.toLowerCase()))) {
+    // Step 1: Check ignore keywords — skip entirely
+    if (cfg?.ignore?.length && cfg.ignore.some(kw => getFilterText().includes(kw.toLowerCase()))) {
         if (updateLastSeen) await Store.setPointer(env, source.sourceKey, key);
-        return { skipped: true, reason: 'excluded', sourceKey: source.sourceKey, itemKey: key };
+        return { skipped: true, reason: 'ignored', sourceKey: source.sourceKey, itemKey: key };
     }
 
+    // Step 2: Check push keywords (whitelist)
+    let shouldPush = true;
+    if (cfg?.push?.length && !cfg.push.some(kw => getFilterText().includes(kw.toLowerCase()))) {
+        shouldPush = false;
+    }
+
+    // Step 3: Build history item and save
     const notiBody = item.notiBody || item.title || '';
     const historyItem = {
         id: `${source.sourceKey}:${key}`,
@@ -523,12 +547,10 @@ async function processSourceItem(env, source, item, opts = {}) {
     const nextHistory = [historyItem, ...history.filter(it => it.id !== historyItem.id && (Date.now() - Date.parse(it.createdAt)) <= HISTORY_RETENTION_MS)].slice(0, HISTORY_LIMIT);
     await Store.saveHistory(env, nextHistory);
 
-    if (cfg?.includeKeywords?.length && !cfg.includeKeywords.some(kw => getFilterText().includes(kw.toLowerCase()))) {
-        if (updateLastSeen) await Store.setPointer(env, source.sourceKey, key);
-        return { skipped: true, reason: 'filtered', sourceKey: source.sourceKey, itemKey: key };
-    }
-
-    const result = await sendToAllSubscriptions(env, buildNotificationPayload(historyItem, env));
+    // Step 4: Send push notification
+    const result = shouldPush
+        ? await sendToAllSubscriptions(env, buildNotificationPayload(historyItem))
+        : { sent: 0, failed: 0 };
     if (updateLastSeen) await Store.setPointer(env, source.sourceKey, key);
     return { skipped: false, sourceKey: source.sourceKey, itemKey: key, ...result };
 }
@@ -608,20 +630,17 @@ async function processQWeatherRainAlert(env) {
 // Subscription management
 // ---------------------------------------------------------------------------
 async function listSubscriptions(env) {
+    const { keys } = await env.SUBS.list();
     const out = [];
-    let cursor, done = false;
-    while (!done) {
-        const page = await env.SUBS.list({ cursor, limit: 1000 });
-        for (const key of page.keys || []) {
-            if (!/^[0-9a-f]{64}$/i.test(key.name)) continue;
-            try {
-                const { iv, ct } = JSON.parse(await env.SUBS.get(key.name));
-                const { sub } = JSON.parse(await aesGcmDecrypt(env.SUBS_ENC_KEY, iv, ct));
-                if (sub?.endpoint) out.push(sub);
-            } catch { }
-        }
-        cursor = page.cursor;
-        done = page.list_complete;
+    for (const { name } of keys) {
+        if (name === 'items' || name.startsWith('pointer:')) continue;
+        try {
+            const raw = await env.SUBS.get(name);
+            if (!raw) continue;
+            const { iv, ct } = JSON.parse(raw);
+            const { sub } = JSON.parse(await aesGcmDecrypt(env.SUBS_ENC_KEY, iv, ct));
+            if (sub?.endpoint) out.push(sub);
+        } catch { }
     }
     return out;
 }
@@ -687,23 +706,22 @@ export default {
 
         initializeVapid(env);
 
-
-
         if (request.method === 'GET' && url.pathname === '/config') {
             return json({ vapidPublicKey: env.VAPID_PUBLIC_KEY || '' });
         }
 
         if (request.method === 'GET' && url.pathname === '/history') {
             const now = Date.now();
-            const items = (await Store.getHistory(env)).filter(it => (now - Date.parse(it.createdAt)) <= HISTORY_RETENTION_MS);
+            let items = (await Store.getHistory(env)).filter(it => (now - Date.parse(it.createdAt)) <= HISTORY_RETENTION_MS);
+            
+            const since = url.searchParams.get('since');
+            if (since) {
+                const sinceTime = Date.parse(since);
+                if (Number.isFinite(sinceTime)) {
+                    items = items.filter(it => Date.parse(it.createdAt) > sinceTime);
+                }
+            }
             return json({ ok: true, items });
-        }
-
-        if (request.method === 'POST' && url.pathname === '/test-push') {
-            if ((request.headers.get('x-api-key') || '') !== env.SEND_API_KEY) return new Response('Unauthorized', { status: 401 });
-            const payload = buildNotificationPayload({ title: 'Test notification', notiBody: new Date().toISOString() }, env);
-            const result = await sendToAllSubscriptions(env, payload);
-            return json({ ok: true, ...result });
         }
 
         if (request.method === 'POST' && url.pathname === '/subscribe') {
@@ -711,8 +729,9 @@ export default {
             const sub = await request.json();
             if (!sub?.endpoint) return new Response('Bad Request', { status: 400 });
 
+            const key = await sha256hex(sub.endpoint);
             const { iv, ct } = await aesGcmEncrypt(env.SUBS_ENC_KEY, JSON.stringify({ sub, created: Date.now() }));
-            await env.SUBS.put(await sha256hex(sub.endpoint), JSON.stringify({ iv, ct }));
+            await env.SUBS.put(key, JSON.stringify({ iv, ct }));
             return json({ status: 'ok' });
         }
 
@@ -720,7 +739,8 @@ export default {
             if (!isOriginAllowed(request, allowedOrigins)) return new Response('Forbidden', { status: 403 });
             const body = await request.json();
             if (!body?.endpoint) return new Response('Bad Request', { status: 400 });
-            await env.SUBS.delete(await sha256hex(body.endpoint));
+            const key = await sha256hex(body.endpoint);
+            await env.SUBS.delete(key);
             return json({ status: 'deleted' });
         }
 
@@ -801,13 +821,6 @@ export default {
             return new Response(null, { status: 204 });
         }
 
-        if (request.method === 'GET' && url.pathname === '/rss/preview') {
-            const feedUrl = url.searchParams.get('url') || env.POLL_URL || '';
-            if (!feedUrl) return new Response('Missing feed URL', { status: 400 });
-            const preview = await fetchFeedPreview(feedUrl);
-            return json({ ok: true, feedUrl, status: preview.status, contentType: preview.contentType, preview: preview.text.slice(0, 4000) });
-        }
-
         if (request.method === 'POST' && url.pathname === '/rss/send') {
             if ((request.headers.get('x-api-key') || '') !== env.SEND_API_KEY) return new Response('Unauthorized', { status: 401 });
             const body = await request.json().catch(() => ({}));
@@ -832,7 +845,7 @@ export default {
 
     async scheduled(controller, env, ctx) {
         initializeVapid(env);
-        if (controller.cron === '0 */1 * * *') {
+        if (controller.cron === '0 */3 * * *') {
             ctx?.waitUntil?.(processQWeatherRainAlert(env).catch(e => console.error('Weather check failed', e)));
             return;
         }

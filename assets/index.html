@@ -13,7 +13,6 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black">
     <meta name="apple-mobile-web-app-title" content="Attention">
     <style>
-        /* Fonts */
         @font-face {
             font-family: 'Universal';
             src: url('font/latinmodern-math.otf');
@@ -30,6 +29,7 @@
             color-scheme: light dark;
             --main-borderadius: 18px;
             --main-pad: 12px;
+            /* interpolate-size: allow-keywords; */
         }
 
         .permission-grant {
@@ -40,6 +40,7 @@
             box-sizing: border-box;
             text-align: center;
             background-color: purple;
+            color: white;
         }
 
         html,
@@ -50,20 +51,6 @@
 
         a {
             text-decoration: none;
-        }
-
-        ul {
-            padding-left: 1rem;
-        }
-
-        .favicon {
-            display: block;
-            width: auto;
-            height: 1.5rem;
-        }
-
-        .visible {
-            display: inline-block;
         }
 
         .item {
@@ -78,6 +65,13 @@
                 0px 0px 2px rgb(from currentColor r g b / 2%),
                 0px 0px 3px rgb(from currentColor r g b / 1%);
 
+            ul {
+                padding-left: 1rem;
+                display: flex;
+                flex-direction: column;
+                gap: 0.4rem;
+            }
+
             & .meta {
                 font-family: sans-serif;
                 font-size: 0.8rem;
@@ -87,10 +81,17 @@
                 justify-content: space-between;
                 align-items: end;
                 margin-top: 0.5rem;
+
+                & img {
+                    display: block;
+                    width: auto;
+                    height: 1.5rem;
+                }
             }
 
-            & .media {
+            figure {
                 position: relative;
+                margin: 0;
                 border-radius: calc(var(--main-borderadius) - var(--main-pad));
                 overflow: hidden;
                 /* border: 1px solid; */
@@ -102,7 +103,7 @@
                     0px 0px 6px rgb(from currentColor r g b / 4%),
                     0px 0px 8px rgb(from currentColor r g b / 2%);
 
-                & .image {
+                img {
                     display: block;
                     width: 100%;
                     max-height: 20rem;
@@ -110,7 +111,7 @@
                     background: white;
                 }
 
-                & .caption {
+                figcaption {
                     position: absolute;
                     left: 0;
                     right: 0;
@@ -118,6 +119,7 @@
                     padding: 0.5rem;
                     color: white;
                     font-family: sans-serif;
+                    font-weight: bold;
                     font-size: 0.8rem;
                     background-color: rgba(50, 50, 50, 1.0);
                     -webkit-backdrop-filter: blur(1rem);
@@ -130,7 +132,7 @@
                 grid-template-columns: auto 45%;
                 gap: 0.5rem;
 
-                & .image {
+                img {
                     display: block;
                     max-width: 100%;
                     border-radius: 6px;
@@ -153,8 +155,8 @@
             position: fixed;
             bottom: env(safe-area-inset-bottom, 0px);
             left: 22px;
-            height: 3.5rem;
-            width: 3.5rem;
+            height: 3rem;
+            width: 3rem;
             z-index: 10;
             border-color: none;
             border-radius: 50%;
@@ -194,7 +196,7 @@
                 pointer-events: none;
             }
 
-            & li {
+            li {
                 visibility: hidden;
                 display: flex;
                 align-items: center;
@@ -203,13 +205,12 @@
                 list-style: none;
                 font-family: sans-serif;
                 font-weight: bold;
-                border-radius: calc(var(--main-borderadius) - 8px);
                 transition: background-color 0.1s ease;
             }
 
             &.open {
-                height: 16rem;
-                width: 12rem;
+                height: 15rem;
+                width: 12.5rem;
                 border-radius: var(--main-borderadius);
                 padding: 8px;
                 background-color: rgba(255, 255, 255, 0.1);
@@ -229,26 +230,42 @@
                     opacity: 0;
                 }
 
-                & li {
+                li {
+                    touch-action: none;
                     visibility: visible;
+                    border-radius: calc(var(--main-borderadius) - 8px);
                 }
 
-                & li img {
-                    width: 1.5rem;
+                li img {
+                    width: auto;
                     height: 1.5rem;
+                    display: block;
+                    width: auto;
                 }
 
                 & li.selected {
-                    background-color: rgba(0, 0, 0, 0.2);
+                    /* background-color: rgba(125, 125, 125, 0.2); */
+                    background-color: rgb(from currentColor r g b / 0.1);
+                    border: 1px solid rgb(from currentColor r g b / 0.05);
                 }
             }
         }
+
     </style>
 </head>
 
 <body>
+
     <div id="history" style="touch-action: pan-y"></div>
-    <nav></nav>
+    <nav>
+        <li data-key=""><img src="/figure/Git_icon.svg" alt="">Flow</li>
+        <li data-key="picture of the day"><img src="/figure/Wikipedia-logo-v2.svg" alt="">picture of the day</li>
+        <li data-key="on this day"><img src="/figure/Wikipedia-logo-v2.svg" alt="">on this day</li>
+        <li data-key="do you know"><img src="/figure/Wikipedia-logo-v2.svg" alt="">do you know</li>
+        <li data-key="sspai"><img src="/figure/sspai.svg" alt="">sspai</li>
+        <li data-key="ithome"><img src="/figure/IThome_logo.png" alt="">ithome</li>
+    </nav>
+
 
     <script>
         const HISTORY_DB_NAME = 'attention';
@@ -323,20 +340,7 @@
             }
         }
 
-        async function replaceHistoryInDb(items) {
-            const db = await openHistoryDb();
-            try {
-                const transaction = db.transaction(HISTORY_STORE_NAME, 'readwrite');
-                const store = transaction.objectStore(HISTORY_STORE_NAME);
-                store.clear();
-                for (const item of items) {
-                    store.put(item);
-                }
-                await transactionDone(transaction);
-            } finally {
-                db.close();
-            }
-        }
+
 
         function renderHistory(items) {
             allItems = items;
@@ -347,7 +351,7 @@
 
             const fragment = document.createDocumentFragment();
             for (const [index, item] of items.entries()) {
-                fragment.appendChild(buildNotification(item, index));
+                fragment.appendChild(buildHistory(item, index));
             }
             root.appendChild(fragment);
         }
@@ -359,19 +363,17 @@
             parent.appendChild(title);
         }
 
-        function buildNotification(item, index) {
-            const notification = document.createElement('div');
-            notification.className = 'item';
+        function buildHistory(item, index) {
+            const historyItem = document.createElement('div');
+            historyItem.className = 'item';
             const isOnThisDay = item.sourceKey === 'on this day';
             const isIthome = item.sourceKey === 'ithome';
             const isPotd = item.sourceKey === 'picture of the day';
 
             if (isPotd) {
-                const pictureWrap = document.createElement('div');
-                pictureWrap.className = 'media';
+                const pictureWrap = document.createElement('figure');
 
                 const picture = document.createElement('img');
-                picture.className = 'image';
                 picture.src = item.imageUrl;
                 picture.alt = item.imageAlt || '';
                 picture.decoding = 'async';
@@ -379,43 +381,40 @@
                 picture.fetchPriority = index === 0 ? 'high' : 'low';
                 pictureWrap.appendChild(picture);
 
-                const overlay = document.createElement('div');
-                overlay.className = 'caption';
+                const overlay = document.createElement('figcaption');
 
                 if (isPotd && item.notiBody) {
                     const first = item.notiBody.trim();
                     if (first) {
-                        const title = document.createElement('div');
-                        title.textContent = first;
-                        overlay.appendChild(title);
+                        overlay.textContent = first;
                     }
                 }
 
                 pictureWrap.appendChild(overlay);
 
-                notification.appendChild(pictureWrap);
+                historyItem.appendChild(pictureWrap);
 
-                if (!isPotd) appendBody(notification, item);
-                appendMetaRow(notification, item);
-                return notification;
+                if (!isPotd) appendBody(historyItem, item);
+                appendMetaRow(historyItem, item);
+                return historyItem;
             }
 
             if (isOnThisDay) {
-                appendOnThisDayBody(notification, item);
-                appendMetaRow(notification, item);
-                return notification;
+                appendOnThisDayBody(historyItem, item);
+                appendMetaRow(historyItem, item);
+                return historyItem;
             }
 
-            appendSourceHeader(notification, item);
-            appendBody(notification, item);
-            appendMetaRow(notification, item);
-            return notification;
+            appendSourceHeader(historyItem, item);
+            appendBody(historyItem, item);
+            appendMetaRow(historyItem, item);
+            return historyItem;
         }
 
         function appendMetaRow(parent, item) {
             const row = document.createElement('div');
             row.className = 'meta';
-            const sourceMeta = SOURCE_META[(item.sourceKey || '').toLowerCase()] || {};
+            const sourceMeta = SOURCE_META[(item.sourceKey)];
 
             const source = document.createElement('div');
             source.textContent = (item.sourceKey || '') + ' ' + elapsedHoursText(item.publishedAt);
@@ -426,7 +425,6 @@
                 more.href = item.link;
                 // more.target = '_blank';
                 const logo = document.createElement('img');
-                logo.className = 'favicon';
                 logo.src = sourceMeta.logo;
                 logo.alt = item.sourceKey || '';
                 logo.decoding = 'async';
@@ -440,14 +438,17 @@
         }
 
         function appendBody(parent, item) {
-            if ((item.sourceKey || '').toLowerCase() === 'on this day') {
+            if (item.sourceKey === 'on this day') {
                 appendOnThisDayBody(parent, item);
                 return;
             }
-            if ((item.sourceKey || '').toLowerCase() === 'ithome') return;
+            if (item.sourceKey === 'ithome') return;
             if (!item.content) return;
 
             const articleText = document.createElement('div');
+            if (item.sourceKey === 'sspai') {
+                articleText.style.paddingTop = '0.5rem';
+            }
             if (item.content) {
                 articleText.innerHTML = item.content;
             }
@@ -465,7 +466,6 @@
             const annotatedText = document.createElement('div');
             annotatedText.innerHTML = item.content;
             const annotatedPic = document.createElement('img');
-            annotatedPic.className = 'image';
             annotatedPic.src = item.imageUrl;
             annotated.appendChild(annotatedText);
             annotated.appendChild(annotatedPic);
@@ -502,14 +502,35 @@
             }
         }
 
+        async function addItemsToDb(items) {
+            const db = await openHistoryDb();
+            try {
+                const transaction = db.transaction(HISTORY_STORE_NAME, 'readwrite');
+                const store = transaction.objectStore(HISTORY_STORE_NAME);
+                for (const item of items) {
+                    store.put(item);
+                }
+                await transactionDone(transaction);
+            } finally {
+                db.close();
+            }
+        }
+
         async function syncHistory() {
             try {
-                const res = await fetch('/history', { cache: 'no-store' });
+                let since = '';
+                if (allItems.length > 0) {
+                    since = allItems[0].createdAt || '';
+                }
+
+                const url = since ? `/history?since=${encodeURIComponent(since)}` : '/history';
+                const res = await fetch(url, { cache: 'no-store' });
                 if (!res.ok) return;
                 const payload = await res.json();
-                if (!payload || !payload.ok || !Array.isArray(payload.items)) return;
-                await replaceHistoryInDb(payload.items);
-                renderHistory(payload.items);
+                if (!payload || !payload.ok || !Array.isArray(payload.items) || payload.items.length === 0) return;
+
+                await addItemsToDb(payload.items);
+                await renderLocalHistory();
             } catch {
             }
         }
@@ -547,18 +568,7 @@
 
         window.addEventListener('DOMContentLoaded', async () => {
 
-            // Build source picker from SOURCE_META
             const nav = document.querySelector('nav');
-
-            const entries = [{ key: '', label: 'Flow', logo: '/figure/Git_icon.svg' },
-            ...Object.entries(SOURCE_META).map(([sk, m]) => ({ key: sk, label: sk, logo: m.logo }))];
-            for (const { key, label, logo } of entries) {
-                const li = document.createElement('li');
-                li.dataset.key = key;
-                if (logo) { const img = document.createElement('img'); img.src = logo; li.appendChild(img); }
-                li.appendChild(document.createTextNode(label));
-                nav.appendChild(li);
-            }
 
             let activePointerId = null;
 
@@ -605,19 +615,8 @@
                 activePointerId = null;
             }
 
-            function checkOpenUrlParam() {
-                const urlParams = new URLSearchParams(window.location.search);
-                const openUrl = urlParams.get('open');
-                if (openUrl) {
-                    const newUrl = window.location.pathname + window.location.hash;
-                    window.history.replaceState({}, document.title, newUrl);
-                    window.location.href = openUrl;
-                }
-            }
-
             renderLocalHistory();
             syncHistory();
-            checkOpenUrlParam();
 
             try {
                 const res = await fetch('/config', { cache: 'no-store' });
@@ -635,6 +634,10 @@
                 registerBtn.textContent = "Enable Push Notifications";
                 registerBtn.addEventListener('click', subscribe, { once: true });
                 document.body.insertBefore(registerBtn, document.body.firstChild);
+            }
+
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.register('/sw.js', { type: 'module' });
             }
         });
     </script>

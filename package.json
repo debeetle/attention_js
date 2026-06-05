@@ -4,11 +4,10 @@
   "type": "module",
   "scripts": {
     "clean:assets": "find assets -name '.DS_Store' -delete",
-    "dev:remote": "wrangler dev --remote",
-    "dev:local": "wrangler dev --persist-to .wrangler/state/v3",
-    "deploy": "wrangler deploy"
+    "dev:local": "wrangler dev --persist-to .wrangler/state/v3"
   },
   "dependencies": {
-    "fast-xml-parser": "^5.8.0"
+    "@nodable/compact-builder": "^1.0.9",
+    "@nodable/flexible-xml-parser": "^1.2.2"
   }
 }
