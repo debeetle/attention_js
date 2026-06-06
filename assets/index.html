@@ -179,7 +179,10 @@
                 0px 2px 4px rgb(from currentColor r g b / 6%),
                 0px 3px 6px rgb(from currentColor r g b / 4%),
                 0px 4px 8px rgb(from currentColor r g b / 2%);
-            transition: width 0.4s cubic-bezier(0.25, 0.8, 0.25, 1.2), height 0.4s cubic-bezier(0.25, 0.8, 0.25, 1.2), border-radius 0.2s ease, background-color 0.2s ease;
+
+            --spring: linear(0, 0.08, 0.32, 0.72, 1.05, 1.15, 1.13, 1.02, 0.93, 0.91, 0.94, 0.99, 1.01, 1);
+            transition-timing-function: var(--spring), var(--spring), ease, ease;
+            transition-duration: 0.5s;
 
             &::after {
                 content: '';
@@ -226,6 +229,8 @@
                     0px 0px 6px rgb(from currentColor r g b / 4%),
                     0px 0px 8px rgb(from currentColor r g b / 2%);
 
+                transition: width 0.5s cubic-bezier(0.25, 0.8, 0.25, 1.2), height 0.5s cubic-bezier(0.25, 0.8, 0.25, 1.2), border-radius 0.05s ease, background-color 0.5s ease;
+
                 &::after {
                     opacity: 0;
                 }
@@ -250,7 +255,6 @@
                 }
             }
         }
-
     </style>
 </head>
 
