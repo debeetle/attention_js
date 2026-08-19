@@ -5,6 +5,9 @@ workers_dev = false
 keep_vars = true
 placement = { mode = "smart" }
 
+[ai]
+binding = "AI"
+
 [vars]
 VAPID_PUBLIC_KEY = "BJOm2JBG6kQe5CGPhT-SDrv6VpzdtwCANzJKvRZBBawY8eJ0rxeKtftDGNZS6BdCrjDzqZ0PpE-CMkp9SjNnwDs"
 QWEATHER_LOCATION = "101280610"
@@ -28,8 +31,7 @@ binding = "SUBS"
 id = "c659f42d555b4a4ca17c7653677e64cc"
 
 [triggers]
-# Weather cron temporarily disabled for scheduled RSS isolation test: "0 */3 * * *"
-crons = ["15 0 * * *", "0 0,4,8,12 * * *"]
+crons = ["15 0 * * *", "0 0,4,8,12 * * *", "0 */3 * * *"]
 
 [[routes]]
 pattern = "attention.debeetle.cn.eu.org"

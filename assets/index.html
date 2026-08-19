@@ -45,8 +45,14 @@
 
         html,
         body {
+            margin: 0;
+            padding: 0;
             -webkit-overflow-scrolling: touch;
             font-family: 'Universal';
+        }
+
+        #history {
+            padding-top: calc(env(safe-area-inset-top, 0px) + 1rem);
         }
 
         a {
@@ -54,16 +60,11 @@
         }
 
         .item {
-            margin: 1rem 0;
+            margin: 0;
             padding: var(--main-pad);
-            border: 1px solid;
-            border-color: rgb(from currentColor r g b / 15%);
-            border-radius: var(--main-borderadius);
+            border-bottom: 1px solid rgb(from currentColor r g b / 15%);
+            border-radius: 0;
             max-width: 100%;
-            box-shadow:
-                0px 0px 1px rgb(from currentColor r g b / 3%),
-                0px 0px 2px rgb(from currentColor r g b / 2%),
-                0px 0px 3px rgb(from currentColor r g b / 1%);
 
             ul {
                 padding-left: 1rem;
@@ -92,16 +93,8 @@
             figure {
                 position: relative;
                 margin: 0;
-                border-radius: calc(var(--main-borderadius) - var(--main-pad));
+                border-radius: 0;
                 overflow: hidden;
-                /* border: 1px solid; */
-                /* border-color: rgb(from currentColor r g b / 20%); */
-                box-shadow:
-                    0px 0px 1px rgb(from currentColor r g b / 10%),
-                    0px 0px 2px rgb(from currentColor r g b / 8%),
-                    0px 0px 4px rgb(from currentColor r g b / 6%),
-                    0px 0px 6px rgb(from currentColor r g b / 4%),
-                    0px 0px 8px rgb(from currentColor r g b / 2%);
 
                 img {
                     display: block;
@@ -135,15 +128,7 @@
                 img {
                     display: block;
                     max-width: 100%;
-                    border-radius: 6px;
-                    /* border: 1px solid;
-                    border-color: rgb(from currentColor r g b / 20%); */
-                    box-shadow:
-                        0px 0px 1px rgb(from currentColor r g b / 10%),
-                        0px 0px 2px rgb(from currentColor r g b / 8%),
-                        0px 0px 4px rgb(from currentColor r g b / 6%),
-                        0px 0px 6px rgb(from currentColor r g b / 4%),
-                        0px 0px 8px rgb(from currentColor r g b / 2%);
+                    border-radius: 0;
                 }
             }
         }
@@ -180,9 +165,8 @@
                 0px 3px 6px rgb(from currentColor r g b / 4%),
                 0px 4px 8px rgb(from currentColor r g b / 2%);
 
-            --spring: linear(0, 0.08, 0.32, 0.72, 1.05, 1.15, 1.13, 1.02, 0.93, 0.91, 0.94, 0.99, 1.01, 1);
-            transition-timing-function: var(--spring), var(--spring), ease, ease;
-            transition-duration: 0.5s;
+            --spring: linear(0, 0.08, 0.32, 0.72, 1.05, 1.15, 1.13, 1.02, 0.93, 0.91, 0.94, 0.99, 1);
+            transition: width 0.4s var(--spring), height 0.4s var(--spring), border-radius 0.05s ease, background-color 0.4s ease;
 
             &::after {
                 content: '';
@@ -229,7 +213,7 @@
                     0px 0px 6px rgb(from currentColor r g b / 4%),
                     0px 0px 8px rgb(from currentColor r g b / 2%);
 
-                transition: width 0.5s cubic-bezier(0.25, 0.8, 0.25, 1.2), height 0.5s cubic-bezier(0.25, 0.8, 0.25, 1.2), border-radius 0.05s ease, background-color 0.5s ease;
+                transition: width 0.4s cubic-bezier(0.25, 0.8, 0.25, 1.2), height 0.4s cubic-bezier(0.25, 0.8, 0.25, 1.2), border-radius 0.05s ease, background-color 0.4s ease;
 
                 &::after {
                     opacity: 0;
@@ -551,23 +535,12 @@
         }
 
         async function subscribe() {
-            const permission = Notification.permission === 'granted'
-                ? 'granted'
-                : await Notification.requestPermission();
-            if (permission !== 'granted') return;
-
-            const subscription = await window.pushManager.subscribe({
-                userVisibleOnly: true,
-                applicationServerKey: urlBase64ToUint8Array(PUBLIC_VAPID_KEY)
-            });
-
-            await fetch('/subscribe', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(subscription)
-            });
-
-
+            if ((Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission()) !== 'granted') return;
+            const pm = window.pushManager || (await navigator.serviceWorker?.ready)?.pushManager;
+            const sub = await pm?.getSubscription() || (PUBLIC_VAPID_KEY && await pm?.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(PUBLIC_VAPID_KEY) }));
+            if (!sub || localStorage.getItem('pwa_sub_endpoint') === sub.endpoint) return;
+            const res = await fetch('/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sub) });
+            if (res.ok) localStorage.setItem('pwa_sub_endpoint', sub.endpoint);
         }
 
         window.addEventListener('DOMContentLoaded', async () => {

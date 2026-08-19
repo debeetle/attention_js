@@ -1,4 +1,4 @@
-const CACHE_NAME = 'attention-v1';
+const CACHE_NAME = 'attention1';
 const ASSETS = [
     '/',
     '/index.html',

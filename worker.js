@@ -32,12 +32,13 @@ const DEFAULT_RSS_SOURCES = [
     },
     {
         sourceKey: 'sspai', feedUrl: 'https://sspai.com/feed',
-        push: [], ignore: [],
         crons: ['0 0,4,8,12 * * *']
     },
     {
         sourceKey: 'ithome', feedUrl: 'https://www.ithome.com/rss/',
-        push: ["苹果", "微软", "谷歌"], ignore: ['追觅', '小鹏', '奥迪', '快手', '抖音', '微博', '比亚迪', '零跑', '吉利', '领克', '鸿蒙智', '鼠标', '电影票房', '荣耀', '券', '智界', '问界', '尊界', '抖音', '车型', '补贴', '联名', '月卡', '年卡', '红包'],
+        query: '数码科技 新品发布 技术突破 深度报道 软件更新 排除广告导购',
+        minScore: 0,
+        push: ["苹果", "微软", "谷歌"],
         crons: ['0 0,4,8,12 * * *']
     }
 ];
@@ -497,80 +498,93 @@ const Store = {
     saveHistory: (env, history) => env.SUBS.put(HISTORY_KEY, JSON.stringify(history))
 };
 
-const getUnseenItems = (items, lastKey = '') => {
+const getUnseenItems = (sourceKey, items, lastKey = '', historyIds = null) => {
     const list = asArray(items).filter(Boolean);
     const idx = lastKey ? list.findIndex(it => Store.deriveKey(it) === lastKey) : -1;
-    return idx < 0 ? list : list.slice(idx + 1);
+    if (idx >= 0) return list.slice(idx + 1);
+    const now = Date.now();
+    return list.filter(it => {
+        const k = Store.deriveKey(it);
+        const pub = it.publishedAt ? Date.parse(it.publishedAt) : NaN;
+        return k && !historyIds?.has(`${sourceKey}:${k}`) && (!Number.isFinite(pub) || (now - pub) <= HISTORY_RETENTION_MS);
+    });
 };
-
-async function processSourceItem(env, source, item, opts = {}) {
-    const { updateLastSeen = true } = opts;
-    const key = Store.deriveKey(item);
-    if (!key) return { skipped: true, reason: 'missing_key', sourceKey: source.sourceKey };
-
-    const lastKey = await Store.getPointer(env, source.sourceKey);
-    if (lastKey === key) return { skipped: true, reason: 'duplicate', sourceKey: source.sourceKey, itemKey: key };
-
-    const cfg = DEFAULT_RSS_SOURCES.find(f => f.sourceKey === source.sourceKey);
-    let cachedFilterText = null;
-    const getFilterText = () => cachedFilterText ??= [item.title, item.notiBody].filter(Boolean).join(' ').toLowerCase();
-
-    // Step 1: Check ignore keywords — skip entirely
-    if (cfg?.ignore?.length && cfg.ignore.some(kw => getFilterText().includes(kw.toLowerCase()))) {
-        if (updateLastSeen) await Store.setPointer(env, source.sourceKey, key);
-        return { skipped: true, reason: 'ignored', sourceKey: source.sourceKey, itemKey: key };
-    }
-
-    // Step 2: Check push keywords (whitelist)
-    let shouldPush = true;
-    if (cfg?.push?.length && !cfg.push.some(kw => getFilterText().includes(kw.toLowerCase()))) {
-        shouldPush = false;
-    }
-
-    // Step 3: Build history item and save
-    const notiBody = item.notiBody || item.title || '';
-    const historyItem = {
-        id: `${source.sourceKey}:${key}`,
-        sourceKey: source.sourceKey,
-        title: item.title || '',
-        content: item.content || '',
-        link: item.link || '',
-        imageUrl: item.imageUrl || '',
-        publishedAt: item.publishedAt || '',
-        description: notiBody,
-        notiTitle: item.notiTitle || '',
-        notiBody: notiBody,
-        createdAt: new Date().toISOString()
-    };
-
-    const history = await Store.getHistory(env);
-    const nextHistory = [historyItem, ...history.filter(it => it.id !== historyItem.id && (Date.now() - Date.parse(it.createdAt)) <= HISTORY_RETENTION_MS)].slice(0, HISTORY_LIMIT);
-    await Store.saveHistory(env, nextHistory);
-
-    // Step 4: Send push notification
-    const result = shouldPush
-        ? await sendToAllSubscriptions(env, buildNotificationPayload(historyItem))
-        : { sent: 0, failed: 0 };
-    if (updateLastSeen) await Store.setPointer(env, source.sourceKey, key);
-    return { skipped: false, sourceKey: source.sourceKey, itemKey: key, ...result };
-}
 
 async function processFeedItems(env, source, items, opts = {}) {
     const lastKey = opts.lastItemKey || await Store.getPointer(env, source.sourceKey) || '';
-    const unseen = getUnseenItems(items, lastKey);
-    const results = { sourceKey: source.sourceKey, total: unseen.length, processed: 0, sent: 0, failed: 0, errors: [] };
+    const history = await Store.getHistory(env);
+    const historyIds = new Set(history.map(it => it.id));
 
-    for (const item of unseen) {
-        const r = await processSourceItem(env, source, item, opts);
-        if (r.skipped) { continue; }
+    const unseen = getUnseenItems(source.sourceKey, items, lastKey, historyIds);
+    const results = { sourceKey: source.sourceKey, total: unseen.length, processed: 0, sent: 0, failed: 0, errors: [] };
+    if (!unseen.length) return results;
+
+    const cfg = DEFAULT_RSS_SOURCES.find(f => f.sourceKey === source.sourceKey);
+    const newItems = [], pushItems = [];
+    let latestKey = null;
+
+    const scores = new Map();
+    if (cfg?.query && env?.AI && unseen.length > 0) {
+        try {
+            const contexts = unseen.map(it => ({ text: `${it.title || ''} ${it.notiBody || it.description || ''}`.slice(0, 500) }));
+            const rankRes = await env.AI.run('@cf/baai/bge-reranker-base', { query: cfg.query, contexts });
+            for (const r of rankRes || []) scores.set(r.index, r.score);
+        } catch (e) {
+            console.error('AI rerank failed', e);
+        }
+    }
+
+    for (let i = 0; i < unseen.length; i++) {
+        const item = unseen[i];
+        const key = Store.deriveKey(item);
+        if (!key) continue;
+        latestKey = key;
+
+        const score = scores.get(i);
+        if (cfg?.query && score !== undefined && score < (cfg.minScore ?? 0)) continue;
+
+        const notiBody = item.notiBody || item.title || '';
+        const filterText = `${item.title} ${notiBody}`.toLowerCase();
+        const historyItem = {
+            id: `${source.sourceKey}:${key}`,
+            sourceKey: source.sourceKey,
+            itemId: item.itemId || key,
+            title: item.title || '', content: item.content || '', link: item.link || '',
+            imageUrl: item.imageUrl || '', publishedAt: item.publishedAt || '',
+            description: notiBody, notiTitle: item.notiTitle || '', notiBody,
+            createdAt: new Date().toISOString()
+        };
+
+        newItems.push(historyItem);
         results.processed++;
-        results.sent += r.sent || 0;
-        results.failed += r.failed || 0;
-        if (r.errors?.length) results.errors.push(...r.errors);
-        if (r.failed > 0) break;
+
+        if (!cfg?.push?.length || cfg.push.some(kw => filterText.includes(kw.toLowerCase()))) {
+            pushItems.push(historyItem);
+        }
+    }
+
+    if (newItems.length) {
+        const now = Date.now(), newIds = new Set(newItems.map(h => h.id));
+        const next = [...newItems.reverse(), ...history.filter(it => !newIds.has(it.id) && (now - Date.parse(it.createdAt)) <= HISTORY_RETENTION_MS)].slice(0, HISTORY_LIMIT);
+        await Store.saveHistory(env, next);
+    }
+    if ((opts.updateLastSeen ?? true) && latestKey) await Store.setPointer(env, source.sourceKey, latestKey);
+
+    if (pushItems.length) {
+        const subs = opts.subs || await listSubscriptions(env);
+        for (const item of pushItems) {
+            const r = await sendToAllSubscriptions(env, buildNotificationPayload(item), subs);
+            results.sent += r.sent || 0;
+            results.failed += r.failed || 0;
+            if (r.errors?.length) results.errors.push(...r.errors);
+            if (r.failed > 0) break;
+        }
     }
     return results;
 }
+
+const processSourceItem = (env, source, item, opts = {}) =>
+    processFeedItems(env, source, [item], opts).then(r => ({ skipped: r.processed === 0, ...r }));
 
 async function processFetchedFeedText(env, source, feedText, opts = {}) {
     const items = await parseFeedItems(feedText, source);
@@ -645,8 +659,8 @@ async function listSubscriptions(env) {
     return out;
 }
 
-async function sendToAllSubscriptions(env, payload) {
-    const subs = await listSubscriptions(env);
+async function sendToAllSubscriptions(env, payload, subs = null) {
+    subs = subs || await listSubscriptions(env);
     const results = { total: subs.length, sent: 0, failed: 0, errors: [] };
     console.log(`[Push] subs=${subs.length}, payload=${JSON.stringify(payload).slice(0, 300)}`);
     for (const sub of subs) {
